@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import {
-  View, Text, Image, TouchableOpacity, StyleSheet,
-  Alert, ScrollView, ActivityIndicator,
+  View, Text, TextInput, Image, TouchableOpacity, StyleSheet,
+  Alert, ScrollView, ActivityIndicator, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../store/authStore';
 import { useRideStore } from '../store/rideStore';
+import { supabase } from '../lib/supabase';
 import { C } from '../theme/colors';
 
 const ROLE_CONFIG = {
@@ -14,8 +15,25 @@ const ROLE_CONFIG = {
   admin:     { emoji: '📊', label: 'Admin',    color: C.purple, dim: 'rgba(168,85,247,0.12)' },
 };
 
-function SectionHeader({ title }) {
-  return <Text style={s.sectionHeader}>{title}</Text>;
+const COMMUNITY_RULES = [
+  { icon: '✅', text: 'Agree on fare before the ride starts.' },
+  { icon: '🚫', text: 'No-shows can result in account suspension.' },
+  { icon: '🛡️', text: 'Report unsafe behavior immediately.' },
+  { icon: '🤝', text: 'Treat drivers and passengers with respect.' },
+  { icon: '📍', text: 'Share trip details with a trusted contact.' },
+];
+
+function SectionHeader({ title, onEdit }) {
+  return (
+    <View style={s.sectionHeaderRow}>
+      <Text style={s.sectionHeader}>{title}</Text>
+      {onEdit ? (
+        <TouchableOpacity onPress={onEdit} style={s.editBtn}>
+          <Text style={s.editBtnText}>✏ Edit</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
 }
 
 function InfoRow({ label, value, last }) {
@@ -23,6 +41,23 @@ function InfoRow({ label, value, last }) {
     <View style={[s.infoRow, last && { borderBottomWidth: 0 }]}>
       <Text style={s.infoLabel}>{label}</Text>
       <Text style={s.infoValue} numberOfLines={2}>{value || '—'}</Text>
+    </View>
+  );
+}
+
+function LabeledInput({ label, value, onChangeText, placeholder, keyboardType }) {
+  return (
+    <View style={s.modalField}>
+      <Text style={s.modalFieldLabel}>{label}</Text>
+      <TextInput
+        style={s.modalInput}
+        value={value ?? ''}
+        onChangeText={onChangeText}
+        placeholder={placeholder ?? label}
+        placeholderTextColor={C.muted2}
+        keyboardType={keyboardType ?? 'default'}
+        autoCorrect={false}
+      />
     </View>
   );
 }
@@ -68,15 +103,68 @@ function PhotoCard({ uri, label, onPress, uploading }) {
 }
 
 export default function ProfileScreen() {
-  const { profile, session, signOut, updateProfilePhoto } = useAuthStore();
+  const { profile, session, signOut, updateProfilePhoto, fetchProfile } = useAuthStore();
   const { rideHistory } = useRideStore();
-  const [uploading, setUploading] = useState({});
+  const [uploading, setUploading]       = useState({});
+  const [editVisible, setEditVisible]   = useState(false);
+  const [savingProfile, setSaving]      = useState(false);
+  const [editData, setEditData]         = useState({});
 
   const handleSignOut = () => {
     Alert.alert('Mag-logout', 'Sigurado ka bang mag-logout?', [
       { text: 'Hindi', style: 'cancel' },
       { text: 'Oo, logout', style: 'destructive', onPress: signOut },
     ]);
+  };
+
+  const openEditModal = () => {
+    setEditData({
+      given_name:        profile?.given_name        ?? '',
+      surname:           profile?.surname           ?? '',
+      middle_initial:    profile?.middle_initial    ?? '',
+      house_no:          profile?.house_no          ?? '',
+      street:            profile?.street            ?? '',
+      brgy_purok:        profile?.brgy_purok        ?? '',
+      city_municipality: profile?.city_municipality ?? '',
+      province:          profile?.province          ?? '',
+      zip_code:          profile?.zip_code          ?? '',
+    });
+    setEditVisible(true);
+  };
+
+  const handleSaveProfile = async () => {
+    const userId = session?.user?.id;
+    if (!userId) { Alert.alert('Error', 'Session expired. Please log in again.'); return; }
+    setSaving(true);
+    try {
+      const fullName = [
+        editData.given_name,
+        editData.middle_initial ? `${editData.middle_initial}.` : null,
+        editData.surname,
+      ].filter(Boolean).join(' ') || profile?.name;
+
+      const { error } = await supabase.from('profiles').update({
+        given_name:        editData.given_name        || null,
+        surname:           editData.surname           || null,
+        middle_initial:    editData.middle_initial    || null,
+        house_no:          editData.house_no          || null,
+        street:            editData.street            || null,
+        brgy_purok:        editData.brgy_purok        || null,
+        city_municipality: editData.city_municipality || null,
+        province:          editData.province          || null,
+        zip_code:          editData.zip_code          || null,
+        name: fullName,
+      }).eq('id', userId);
+
+      if (error) throw new Error(error.message);
+      await fetchProfile(userId);
+      setEditVisible(false);
+      Alert.alert('Saved ✓', 'Profile updated successfully.');
+    } catch (e) {
+      Alert.alert('Save failed', e?.message ?? 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const pickAndUpload = async (type, label) => {
@@ -134,6 +222,8 @@ export default function ProfileScreen() {
   const avatarUri = isDriver ? profile?.license_photo_url : profile?.id_photo_url;
   const anyUploading = Object.values(uploading).some(Boolean);
 
+  const set = (key) => (val) => setEditData((d) => ({ ...d, [key]: val }));
+
   return (
     <ScrollView style={s.root} contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
@@ -152,7 +242,6 @@ export default function ProfileScreen() {
               <Text style={s.avatarText}>{initial}</Text>
             </View>
           )}
-          {/* Camera badge */}
           <View style={s.cameraBadge}>
             {uploading[isDriver ? 'license' : 'id']
               ? <ActivityIndicator size="small" color="#000" />
@@ -186,7 +275,7 @@ export default function ProfileScreen() {
       </View>
 
       {/* ── PERSONAL INFO ── */}
-      <SectionHeader title="Personal Information" />
+      <SectionHeader title="Personal Information" onEdit={openEditModal} />
       <View style={s.infoCard}>
         <InfoRow label="Surname"    value={profile?.surname} />
         <InfoRow label="Given Name" value={profile?.given_name} />
@@ -235,6 +324,17 @@ export default function ProfileScreen() {
         </>
       )}
 
+      {/* ── COMMUNITY RULES ── */}
+      <SectionHeader title="Community Rules" />
+      <View style={s.rulesCard}>
+        {COMMUNITY_RULES.map((rule, i) => (
+          <View key={i} style={[s.ruleRow, i === COMMUNITY_RULES.length - 1 && { borderBottomWidth: 0 }]}>
+            <Text style={s.ruleIcon}>{rule.icon}</Text>
+            <Text style={s.ruleText}>{rule.text}</Text>
+          </View>
+        ))}
+      </View>
+
       {/* ── SAFETY CARD ── */}
       <View style={s.safetyCard}>
         <Text style={s.safetyTitle}>🛡  Safety</Text>
@@ -244,6 +344,9 @@ export default function ProfileScreen() {
           {' '}(PNP) or{' '}
           <Text style={{ color: C.red, fontWeight: '700' }}>911</Text>.
         </Text>
+        <Text style={[s.safetySub, { marginTop: 6 }]}>
+          Violations may result in account warnings or permanent suspension.
+        </Text>
       </View>
 
       {/* ── SIGN OUT ── */}
@@ -252,6 +355,51 @@ export default function ProfileScreen() {
       </TouchableOpacity>
 
       <Text style={s.footer}>ParaPo v1.0.0 · Para sa komunidad 🛺</Text>
+
+      {/* ── EDIT PROFILE MODAL ── */}
+      <Modal
+        visible={editVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => !savingProfile && setEditVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={s.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={s.modalCard}>
+            <View style={s.modalHeader}>
+              <Text style={s.modalTitle}>Edit Profile</Text>
+              <TouchableOpacity onPress={() => !savingProfile && setEditVisible(false)}>
+                <Text style={s.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              <Text style={s.modalSectionLabel}>Name</Text>
+              <LabeledInput label="Surname"      value={editData.surname}        onChangeText={set('surname')} />
+              <LabeledInput label="Given Name"   value={editData.given_name}     onChangeText={set('given_name')} />
+              <LabeledInput label="Middle Init." value={editData.middle_initial} onChangeText={set('middle_initial')} />
+              <Text style={s.modalSectionLabel}>Address</Text>
+              <LabeledInput label="House No."    value={editData.house_no}          onChangeText={set('house_no')} />
+              <LabeledInput label="Street"       value={editData.street}            onChangeText={set('street')} />
+              <LabeledInput label="Brgy / Purok" value={editData.brgy_purok}        onChangeText={set('brgy_purok')} />
+              <LabeledInput label="City / Municipality" value={editData.city_municipality} onChangeText={set('city_municipality')} />
+              <LabeledInput label="Province"     value={editData.province}          onChangeText={set('province')} />
+              <LabeledInput label="ZIP Code"     value={editData.zip_code}          onChangeText={set('zip_code')} keyboardType="number-pad" />
+            </ScrollView>
+            <TouchableOpacity
+              style={[s.modalSaveBtn, savingProfile && { opacity: 0.6 }]}
+              onPress={handleSaveProfile}
+              disabled={savingProfile}
+              activeOpacity={0.8}
+            >
+              {savingProfile
+                ? <ActivityIndicator color="#000" />
+                : <Text style={s.modalSaveBtnText}>Save Changes</Text>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </ScrollView>
   );
 }
@@ -260,11 +408,16 @@ const s = StyleSheet.create({
   root:   { flex: 1, backgroundColor: C.bg },
   scroll: { padding: 20, paddingBottom: 50 },
 
+  sectionHeaderRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: 8, marginTop: 6, marginLeft: 2,
+  },
   sectionHeader: {
     fontSize: 11, fontWeight: '700', color: C.muted,
     textTransform: 'uppercase', letterSpacing: 1,
-    marginBottom: 8, marginTop: 6, marginLeft: 2,
   },
+  editBtn:     { backgroundColor: C.accentDim, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: C.accent + '44' },
+  editBtnText: { fontSize: 11, fontWeight: '700', color: C.accent },
 
   // ── Hero ──────────────────────────────────────────────────
   heroSection: { alignItems: 'center', paddingVertical: 24 },
@@ -347,6 +500,19 @@ const s = StyleSheet.create({
   photoEmptyIcon: { fontSize: 28 },
   photoEmptyText: { fontSize: 13, color: C.muted, fontWeight: '600' },
 
+  // ── Community rules ───────────────────────────────────────
+  rulesCard: {
+    backgroundColor: C.surface, borderRadius: 18,
+    borderWidth: 1, borderColor: C.border,
+    overflow: 'hidden', marginBottom: 14,
+  },
+  ruleRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    padding: 13, borderBottomWidth: 1, borderBottomColor: C.border,
+  },
+  ruleIcon: { fontSize: 15, marginTop: 1 },
+  ruleText: { fontSize: 13, color: C.muted, flex: 1, lineHeight: 18 },
+
   // ── Safety card ───────────────────────────────────────────
   safetyCard: {
     backgroundColor: C.redDim, borderRadius: 14,
@@ -366,4 +532,36 @@ const s = StyleSheet.create({
   signOutText: { color: C.red, fontWeight: '700', fontSize: 15 },
 
   footer: { textAlign: 'center', fontSize: 12, color: C.muted2 },
+
+  // ── Edit modal ────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 20, paddingBottom: 36, maxHeight: '90%',
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle:  { fontSize: 17, fontWeight: '800', color: C.text },
+  modalClose:  { fontSize: 18, color: C.muted, paddingHorizontal: 4 },
+  modalSectionLabel: {
+    fontSize: 10, fontWeight: '700', color: C.muted,
+    textTransform: 'uppercase', letterSpacing: 1,
+    marginTop: 12, marginBottom: 4, marginLeft: 2,
+  },
+  modalField:      { marginBottom: 10 },
+  modalFieldLabel: { fontSize: 11, color: C.muted, marginBottom: 3, marginLeft: 2 },
+  modalInput: {
+    backgroundColor: C.bg, borderRadius: 12, borderWidth: 1, borderColor: C.border,
+    padding: 13, fontSize: 14, color: C.text,
+  },
+  modalSaveBtn: {
+    backgroundColor: C.accent, borderRadius: 14, padding: 16,
+    alignItems: 'center', marginTop: 18,
+  },
+  modalSaveBtnText: { fontSize: 15, fontWeight: '800', color: '#000' },
 });

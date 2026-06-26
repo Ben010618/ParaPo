@@ -228,6 +228,21 @@ export const useAuthStore = create((set, get) => ({
   signIn: async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
+
+    // Block disabled accounts before they reach the app
+    if (data?.user?.id) {
+      const { data: p } = await supabase
+        .from('profiles').select('is_disabled, disabled_reason').eq('id', data.user.id).single();
+      if (p?.is_disabled) {
+        await supabase.auth.signOut();
+        throw new Error(
+          p.disabled_reason
+            ? `Account suspended: ${p.disabled_reason}`
+            : 'Your account has been suspended. Please contact the administrator.',
+        );
+      }
+    }
+
     return data;
   },
 

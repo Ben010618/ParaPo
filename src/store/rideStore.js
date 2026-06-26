@@ -35,9 +35,15 @@ export const useRideStore = create((set, get) => ({
     }
   },
 
-  subscribeMessages: (rideId) => {
+  subscribeMessages: async (rideId) => {
     if (msgChannel) supabase.removeChannel(msgChannel);
-    set({ rideMessages: [] });
+    // Fetch existing messages first so both sides see full history
+    try {
+      const { data } = await supabase
+        .from('ride_messages').select('*')
+        .eq('ride_id', rideId).order('created_at', { ascending: true });
+      set({ rideMessages: data ?? [] });
+    } catch (_) { set({ rideMessages: [] }); }
     msgChannel = supabase.channel(`msgs-${rideId}`)
       .on('postgres_changes', {
         event: 'INSERT', schema: 'public',
@@ -128,6 +134,17 @@ export const useRideStore = create((set, get) => ({
     if (error) throw error;
     set({ activeRide: null });
     return data;
+  },
+
+  confirmFare: async (rideId, amount) => {
+    const fare = parseInt(amount, 10);
+    if (!rideId || !fare) return;
+    const { error } = await supabase
+      .from('ride_requests').update({ agreed_fare: fare }).eq('id', rideId);
+    if (error) throw new Error(error.message);
+    set((s) => ({
+      activeRide: s.activeRide ? { ...s.activeRide, agreed_fare: fare } : s.activeRide,
+    }));
   },
 
   submitRating: async (rideId, rating) => {

@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
 import { useRideStore } from '../store/rideStore';
@@ -170,11 +171,14 @@ function StarRating({ value, onChange }) {
 }
 
 export default function PassengerMapScreen() {
-  const mapRef         = useRef(null);
-  const mountedRef     = useRef(true);
-  const cardAnim       = useRef(new Animated.Value(500)).current;
-  const searchTimer    = useRef(null);
-  const cancelTimerRef = useRef(null);
+  const mapRef           = useRef(null);
+  const mountedRef       = useRef(true);
+  const cardAnim         = useRef(new Animated.Value(500)).current;
+  const searchTimer      = useRef(null);
+  const cancelTimerRef   = useRef(null);
+  const triedDriverIds   = useRef([]);
+  const driversRef       = useRef([]);
+  const matchedDriverRef = useRef(null);
 
   const [rideState,        setRideState]        = useState(RS.IDLE);
   const [userLocation,     setUserLocation]     = useState(null);
@@ -187,14 +191,25 @@ export default function PassengerMapScreen() {
   const [destModalVisible, setDestModalVisible] = useState(false);
   const [cancelSecsLeft,   setCancelSecsLeft]   = useState(CANCEL_WINDOW_SECS);
   const [driverLiveCoord,  setDriverLiveCoord]  = useState(null);
+  const [freeText,         setFreeText]         = useState('');
+  const [fareInput,        setFareInput]        = useState('');
+  const [showFareInput,    setShowFareInput]    = useState(false);
+  const [showReportModal,  setShowReportModal]  = useState(false);
+  const [selectedReason,   setSelectedReason]   = useState('');
+  const [reportDesc,       setReportDesc]       = useState('');
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const msgScrollRef = useRef(null);
 
   const { session } = useAuthStore();
   const {
     activeRide, requestRide, cancelRide,
     matchedDriverProfile,
     rideMessages, sendMessage, subscribeMessages, unsubscribeMessages,
-    submitRating,
+    submitRating, confirmFare,
   } = useRideStore();
+
+  // ── Notification permissions ──────────────────────────────────
+  useEffect(() => { Notifications.requestPermissionsAsync().catch(() => {}); }, []);
 
   // ── Mount guard ───────────────────────────────────────────────
   useEffect(() => {
@@ -226,6 +241,10 @@ export default function PassengerMapScreen() {
       }
     })();
   }, []);
+
+  // Keep refs current so Realtime callbacks always see fresh values
+  useEffect(() => { driversRef.current     = drivers; },       [drivers]);
+  useEffect(() => { matchedDriverRef.current = matchedDriver; }, [matchedDriver]);
 
   // ── Realtime driver list ───────────────────────────────────────
   useEffect(() => {
@@ -267,9 +286,66 @@ export default function PassengerMapScreen() {
         if (payload.new?.status === 'completed') {
           setRideState(RS.ARRIVED);
           slideCardIn();
+        } else if (payload.new?.status === 'accepted') {
+          const dp    = useRideStore.getState().matchedDriverProfile;
+          const dName = dp?.given_name ?? dp?.name ?? 'Your driver';
+          const plate = dp?.plate_number ? ` · Plate: ${dp.plate_number}` : '';
+          Notifications.scheduleNotificationAsync({
+            content: {
+              title: '🛺 Driver accepted your ride!',
+              body:  `${dName}${plate} is on the way. Look for their tricycle.`,
+              sound: true,
+            },
+            trigger: null,
+          }).catch(() => {});
         } else if (payload.new?.status === 'declined') {
-          handleCancel(false);
-          Alert.alert('Pasensya na', 'The driver declined your request. Please try again.');
+          // Auto-retry with next nearest untried driver
+          const prev    = matchedDriverRef.current;
+          const tried   = [...triedDriverIds.current, prev?.driver_id].filter(Boolean);
+          triedDriverIds.current = tried;
+          const untried = driversRef.current.filter(d => !tried.includes(d.driver_id));
+
+          if (untried.length > 0 && tried.length < 3) {
+            if (payload.new?.id) cancelRide(payload.new.id);
+            useRideStore.setState({ activeRide: null, matchedDriverProfile: null });
+            setRideState(RS.SEARCHING);
+
+            const nearest = untried.reduce((best, d) => {
+              const dist = Math.hypot(
+                (d.lat ?? 0) - (userLocation?.latitude ?? 0),
+                (d.lng ?? 0) - (userLocation?.longitude ?? 0),
+              );
+              return dist < best.dist ? { driver: d, dist } : best;
+            }, { driver: untried[0], dist: Infinity }).driver;
+
+            searchTimer.current = setTimeout(async () => {
+              if (!mountedRef.current) return;
+              try {
+                await requestRide(
+                  session.user.id, nearest.driver_id,
+                  userLocation.latitude, userLocation.longitude, destination.trim(),
+                );
+                if (!mountedRef.current) return;
+                setMatchedDriver(nearest);
+                setRideState(RS.MATCHED);
+                slideCardIn();
+              } catch (e) {
+                if (!mountedRef.current) return;
+                setRideState(RS.IDLE);
+                triedDriverIds.current = [];
+                Alert.alert('Error', e?.message ?? 'Could not reach another driver.');
+              }
+            }, 2000);
+          } else {
+            handleCancel(false);
+            triedDriverIds.current = [];
+            Alert.alert(
+              tried.length >= 3 ? 'No takers nearby' : 'Pasensya na',
+              tried.length >= 3
+                ? `We tried ${tried.length} nearby drivers and none accepted. Please try again shortly.`
+                : 'The driver is unavailable. Trying another…',
+            );
+          }
         }
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
@@ -403,6 +479,7 @@ export default function PassengerMapScreen() {
 
   const handleCancel = useCallback((showSlide = true) => {
     clearTimeout(searchTimer.current);
+    triedDriverIds.current = [];
     const doReset = () => {
       if (!mountedRef.current) return;
       if (activeRide?.id) cancelRide(activeRide.id);
@@ -437,9 +514,66 @@ export default function PassengerMapScreen() {
     sendMessage(activeRide.id, session.user.id, 'passenger', msg);
   }, [activeRide?.id, session?.user?.id, sendMessage]);
 
+  const handleAgreeFare = useCallback(async (amount) => {
+    if (!activeRide?.id || !session?.user?.id) return;
+    try {
+      await confirmFare(activeRide.id, amount);
+      await sendMessage(activeRide.id, session.user.id, 'passenger', `✅ Fare agreed: ₱${amount} — ready!`);
+    } catch (_) {
+      Alert.alert('Error', 'Could not confirm fare. Please try again.');
+    }
+  }, [activeRide?.id, session?.user?.id, confirmFare, sendMessage]);
+
+  const handleSubmitReport = useCallback(async () => {
+    if (!selectedReason || !session?.user?.id) return;
+    setReportSubmitting(true);
+    try {
+      const { error } = await supabase.from('reports').insert({
+        reporter_id: session.user.id,
+        reported_id: matchedDriverProfile?.id ?? null,
+        ride_id:     activeRide?.id ?? null,
+        reason:      selectedReason,
+        description: reportDesc.trim() || null,
+      });
+      if (error) throw error;
+      setShowReportModal(false);
+      setSelectedReason('');
+      setReportDesc('');
+      Alert.alert('Report Submitted', 'Thank you. Admin will review within 24 hours.');
+    } catch (e) {
+      Alert.alert('Error', e?.message ?? 'Could not submit report. Try again.');
+    } finally {
+      setReportSubmitting(false);
+    }
+  }, [selectedReason, reportDesc, session?.user?.id, matchedDriverProfile?.id, activeRide?.id]);
+
+  const handleSendFree = useCallback(() => {
+    if (!freeText.trim()) return;
+    handleSendMessage(freeText.trim());
+    setFreeText('');
+  }, [freeText, handleSendMessage]);
+
+  const handleSendFare = useCallback(() => {
+    const amount = fareInput.replace(/[^0-9]/g, '');
+    if (!amount) return;
+    handleSendMessage(`💰 Fare proposal: ₱${amount}`);
+    setFareInput('');
+    setShowFareInput(false);
+  }, [fareInput, handleSendMessage]);
+
   const isCardVisible = rideState === RS.MATCHED || rideState === RS.ARRIVED;
   const driverProfile = matchedDriverProfile;
-  const lastDriverMsg = [...rideMessages].reverse().find((m) => m.sender_role === 'driver');
+
+  const etaMinutes = (() => {
+    const coord = driverLiveCoord
+      ?? (matchedDriver?.lat ? { latitude: matchedDriver.lat, longitude: matchedDriver.lng } : null);
+    if (!coord || !userLocation) return null;
+    const distKm = Math.hypot(
+      coord.latitude  - userLocation.latitude,
+      coord.longitude - userLocation.longitude,
+    ) * 111;
+    return Math.max(1, Math.ceil((distKm / 20) * 60));
+  })();
 
   return (
     <View style={s.root}>
@@ -575,20 +709,27 @@ export default function PassengerMapScreen() {
               rideState === RS.SEARCHING && s.paraBtnSearching,
             ]}
             onPress={handleParaPo}
-            activeOpacity={0.85}
+            activeOpacity={0.82}
             disabled={rideState === RS.SEARCHING || rideState === RS.MATCHED}
           >
+            {/* 3-D dome highlight */}
+            <View style={s.paraBtnShine} pointerEvents="none" />
             {rideState === RS.SEARCHING ? (
-              <View style={s.searchingRow}>
-                <ActivityIndicator color={C.accent} size="small" />
-                <Text style={[s.paraBtnText, { color: C.accent, marginLeft: 10 }]}>
-                  Hailing tricycle…
+              <>
+                <ActivityIndicator color={C.accent} size="large" />
+                <Text style={[s.paraBtnText, { color: C.accent, fontSize: 12, marginTop: 8 }]}>
+                  Hailing…
                 </Text>
-              </View>
+              </>
             ) : (
-              <Text style={[s.paraBtnText, rideState === RS.MATCHED && { color: '#fff', fontSize: 16 }]}>
-                {rideState === RS.MATCHED ? '🛺  Driver on the way!' : '🤚  Para Po!'}
-              </Text>
+              <>
+                <Text style={s.paraBtnEmoji}>
+                  {rideState === RS.MATCHED ? '🛺' : '🤚'}
+                </Text>
+                <Text style={[s.paraBtnText, rideState === RS.MATCHED && { color: '#fff', fontSize: 14 }]}>
+                  {rideState === RS.MATCHED ? 'On the way!' : 'Para Po!'}
+                </Text>
+              </>
             )}
           </TouchableOpacity>
 
@@ -612,7 +753,31 @@ export default function PassengerMapScreen() {
               <View style={s.cardHandle} />
               <Text style={s.matchBadge}>🛺  DRIVER ON THE WAY</Text>
 
-              {/* Driver identity */}
+              {/* Prominent driver ID card — name, plate, ETA at a glance */}
+              <View style={s.driverIdCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.driverIdLabel}>DRIVER</Text>
+                  <Text style={s.driverIdName} numberOfLines={1}>
+                    {driverProfile?.given_name
+                      ? [driverProfile.given_name, driverProfile.surname].filter(Boolean).join(' ')
+                      : driverProfile?.name ?? '—'}
+                  </Text>
+                </View>
+                {driverProfile?.plate_number ? (
+                  <View style={s.driverIdPlate}>
+                    <Text style={s.driverIdPlateLabel}>PLATE</Text>
+                    <Text style={s.driverIdPlateNum}>{driverProfile.plate_number}</Text>
+                  </View>
+                ) : null}
+                {etaMinutes ? (
+                  <View style={s.driverIdETA}>
+                    <Text style={s.driverIdETAVal}>~{etaMinutes}</Text>
+                    <Text style={s.driverIdETALabel}>min</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Driver identity (avatar + details) */}
               <View style={s.matchHeader}>
                 <View style={s.matchAvatarRing}>
                   {driverProfile?.license_photo_url ? (
@@ -679,32 +844,110 @@ export default function PassengerMapScreen() {
                 </View>
               </View>
 
-              {/* Incoming driver message */}
-              {lastDriverMsg && (
-                <View style={s.incomingMsgWrap}>
-                  <Text style={s.incomingMsgLabel}>Driver says:</Text>
-                  <Text style={s.incomingMsgText}>"{lastDriverMsg.message}"</Text>
-                </View>
-              )}
+              {/* ── CHAT THREAD ── */}
+              <View style={s.chatBox}>
+                <ScrollView
+                  ref={msgScrollRef}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={s.chatContent}
+                  onContentSizeChange={() => msgScrollRef.current?.scrollToEnd({ animated: true })}
+                >
+                  {rideMessages.length === 0 ? (
+                    <Text style={s.chatEmpty}>
+                      No messages yet.{'\n'}Propose a fare or type a message below.
+                    </Text>
+                  ) : (
+                    rideMessages.map((msg) => {
+                      const isMe      = msg.sender_role === 'passenger';
+                      const isFare    = msg.message.startsWith('💰') || msg.message.startsWith('✅ Fare agreed');
+                      const fareAmt   = msg.message.match(/₱(\d+)/)?.[1];
+                      const agreedFare = activeRide?.agreed_fare;
+                      const showAgree = isFare && !isMe && fareAmt && !agreedFare;
+                      return (
+                        <View key={msg.id ?? msg.created_at}
+                          style={[s.msgBubble, isMe ? s.msgBubbleMe : s.msgBubbleThem, isFare && s.msgBubbleFare]}>
+                          <Text style={[s.msgText, isMe ? s.msgTextMe : s.msgTextThem]}>
+                            {msg.message}
+                          </Text>
+                          {showAgree && (
+                            <TouchableOpacity style={s.agreeBtn} onPress={() => handleAgreeFare(fareAmt)} activeOpacity={0.8}>
+                              <Text style={s.agreeBtnText}>✓ Agree to ₱{fareAmt}</Text>
+                            </TouchableOpacity>
+                          )}
+                          {agreedFare && fareAmt && parseInt(fareAmt) === agreedFare && !isMe && (
+                            <Text style={s.agreedLabel}>✅ You agreed</Text>
+                          )}
+                        </View>
+                      );
+                    })
+                  )}
+                </ScrollView>
+              </View>
 
-              {/* Canned messages */}
-              <Text style={s.cannedTitle}>Send a quick message:</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={s.cannedRow}
-              >
+              {/* Quick-reply chips */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.cannedRow}>
                 {PAX_CANNED.map((msg) => (
-                  <TouchableOpacity
-                    key={msg}
-                    style={s.cannedBtn}
-                    onPress={() => handleSendMessage(msg)}
-                    activeOpacity={0.75}
-                  >
+                  <TouchableOpacity key={msg} style={s.cannedBtn} onPress={() => handleSendMessage(msg)} activeOpacity={0.75}>
                     <Text style={s.cannedText}>{msg}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
+
+              {/* Fare bargaining / free-text input */}
+              {showFareInput ? (
+                <View style={s.fareInputRow}>
+                  <Text style={s.fareRowLabel}>💰 Propose</Text>
+                  <TextInput
+                    style={s.fareInput}
+                    placeholder="Amount (e.g. 25)"
+                    placeholderTextColor={C.muted}
+                    keyboardType="numeric"
+                    value={fareInput}
+                    onChangeText={setFareInput}
+                    autoFocus
+                    returnKeyType="send"
+                    onSubmitEditing={handleSendFare}
+                  />
+                  <TouchableOpacity
+                    style={[s.fareSendBtn, !fareInput.trim() && { opacity: 0.4 }]}
+                    onPress={handleSendFare}
+                    disabled={!fareInput.trim()}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.fareSendText}>₱ Send</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => { setShowFareInput(false); setFareInput(''); }}
+                    style={s.fareCancelBtn}
+                  >
+                    <Text style={{ color: C.muted, fontSize: 16 }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={s.chatInputRow}>
+                  <TouchableOpacity style={s.fareToggleBtn} onPress={() => setShowFareInput(true)} activeOpacity={0.8}>
+                    <Text style={s.fareToggleText}>💰</Text>
+                  </TouchableOpacity>
+                  <TextInput
+                    style={s.chatInput}
+                    placeholder="Type a message…"
+                    placeholderTextColor={C.muted}
+                    value={freeText}
+                    onChangeText={setFreeText}
+                    returnKeyType="send"
+                    onSubmitEditing={handleSendFree}
+                  />
+                  <TouchableOpacity
+                    style={[s.sendBtn, !freeText.trim() && { opacity: 0.35 }]}
+                    onPress={handleSendFree}
+                    disabled={!freeText.trim()}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.sendBtnText}>↑</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* Cancel — 60-second grace window only */}
               {cancelSecsLeft > 0 ? (
@@ -739,11 +982,44 @@ export default function PassengerMapScreen() {
           {rideState === RS.ARRIVED && (
             <View style={s.arrivedWrap}>
               <View style={s.cardHandle} />
-              <Text style={{ fontSize: 64, textAlign: 'center' }}>🛺</Text>
+              <Text style={{ fontSize: 52, textAlign: 'center' }}>🛺</Text>
               <Text style={s.arrivedTitle}>Nakarating na!</Text>
-              <Text style={s.arrivedSub}>
-                {destination ? `You've arrived at ${destination}` : 'Safe ride, bai! 🤚'}
-              </Text>
+
+              {/* Trip summary */}
+              <View style={s.tripCard}>
+                <View style={s.tripRow}>
+                  <Text style={s.tripLabel}>DRIVER</Text>
+                  <Text style={s.tripValue} numberOfLines={1}>
+                    {driverProfile?.given_name
+                      ? [driverProfile.given_name, driverProfile.surname].filter(Boolean).join(' ')
+                      : driverProfile?.name ?? '—'}
+                  </Text>
+                </View>
+                {driverProfile?.plate_number ? (
+                  <View style={s.tripRow}>
+                    <Text style={s.tripLabel}>PLATE</Text>
+                    <Text style={s.tripValue}>{driverProfile.plate_number}</Text>
+                  </View>
+                ) : null}
+                <View style={s.tripRow}>
+                  <Text style={s.tripLabel}>DESTINATION</Text>
+                  <Text style={s.tripValue} numberOfLines={1}>{destination || '—'}</Text>
+                </View>
+                {activeRide?.agreed_fare ? (
+                  <View style={[s.tripRow, { borderBottomWidth: 0 }]}>
+                    <Text style={s.tripLabel}>AGREED FARE</Text>
+                    <Text style={[s.tripValue, { color: C.accent, fontWeight: '900', fontSize: 17 }]}>
+                      ₱{activeRide.agreed_fare}
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={[s.tripRow, { borderBottomWidth: 0 }]}>
+                    <Text style={s.tripLabel}>FARE</Text>
+                    <Text style={[s.tripValue, { color: C.muted }]}>Not agreed in app</Text>
+                  </View>
+                )}
+              </View>
+
               <Text style={s.ratePrompt}>Rate your driver:</Text>
               <StarRating value={rating} onChange={setRating} />
               {rating > 0 && (
@@ -756,10 +1032,65 @@ export default function PassengerMapScreen() {
                   {rating > 0 ? `Submit ${rating}★ & Done` : 'Skip Rating — Done'}
                 </Text>
               </TouchableOpacity>
+              <TouchableOpacity style={s.reportLinkBtn} onPress={() => setShowReportModal(true)}>
+                <Text style={s.reportLinkText}>⚠️ Report an issue with this ride</Text>
+              </TouchableOpacity>
             </View>
           )}
         </Animated.View>
       )}
+
+      {/* ── REPORT MODAL ── */}
+      <Modal visible={showReportModal} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setShowReportModal(false)}>
+        <View style={s.reportOverlay}>
+          <View style={s.reportCard}>
+            <Text style={s.reportTitle}>⚠️ Report an Issue</Text>
+            <Text style={s.reportSub}>What happened? Select the reason:</Text>
+            {[
+              'Driver did not show up',
+              'Driver asked for more than agreed fare',
+              'Driver was rude or threatening',
+              'Driver caused harm or injury',
+              'Other',
+            ].map((reason) => (
+              <TouchableOpacity
+                key={reason}
+                style={[s.reportOption, selectedReason === reason && s.reportOptionSelected]}
+                onPress={() => setSelectedReason(reason)}
+                activeOpacity={0.8}
+              >
+                <Text style={[s.reportOptionText, selectedReason === reason && { color: C.accent }]}>
+                  {reason}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TextInput
+              style={s.reportDescInput}
+              placeholder="Additional details (optional)…"
+              placeholderTextColor={C.muted}
+              value={reportDesc}
+              onChangeText={setReportDesc}
+              multiline
+              numberOfLines={3}
+            />
+            <View style={s.reportBtnRow}>
+              <TouchableOpacity style={s.reportCancelBtn} onPress={() => { setShowReportModal(false); setSelectedReason(''); setReportDesc(''); }} activeOpacity={0.8}>
+                <Text style={{ color: C.muted, fontWeight: '600' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.reportSubmitBtn, (!selectedReason || reportSubmitting) && { opacity: 0.4 }]}
+                onPress={handleSubmitReport}
+                disabled={!selectedReason || reportSubmitting}
+                activeOpacity={0.85}
+              >
+                {reportSubmitting
+                  ? <ActivityIndicator size="small" color="#000" />
+                  : <Text style={s.reportSubmitText}>Submit Report</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* ── DESTINATION MODAL ── */}
       <DestinationModal
@@ -835,12 +1166,44 @@ const s = StyleSheet.create({
   destActiveLabel: { fontSize: 10, color: C.blue, fontWeight: '700', letterSpacing: 0.8 },
   destActiveText:  { fontSize: 14, color: C.text, fontWeight: '600', marginTop: 2 },
 
-  paraBtn:          { backgroundColor: C.accent, borderRadius: 16, paddingVertical: 18, alignItems: 'center', justifyContent: 'center' },
-  paraBtnSearching: { backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border },
-  paraBtnMatched:   { backgroundColor: C.green },
-  paraBtnText:      { fontSize: 18, fontWeight: '800', color: '#000' },
-  searchingRow:     { flexDirection: 'row', alignItems: 'center' },
-  hintText:         { textAlign: 'center', color: C.muted2, fontSize: 12, marginTop: 10 },
+  paraBtn: {
+    width: 120, height: 120, borderRadius: 60,
+    backgroundColor: C.accent,
+    alignItems: 'center', justifyContent: 'center',
+    alignSelf: 'center',
+    marginVertical: 10,
+    // 3-D border: lighter top edge, darker bottom edge
+    borderWidth: 2,
+    borderTopColor:    'rgba(255,255,255,0.45)',
+    borderLeftColor:   'rgba(255,255,255,0.22)',
+    borderRightColor:  'rgba(0,0,0,0.18)',
+    borderBottomColor: 'rgba(0,0,0,0.32)',
+    // depth shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    elevation: 16,
+  },
+  paraBtnShine: {
+    position: 'absolute', top: 10, left: 18,
+    width: 56, height: 26, borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  paraBtnSearching: {
+    backgroundColor: C.surface2,
+    borderColor: C.border,
+    shadowOpacity: 0, elevation: 4,
+  },
+  paraBtnMatched: {
+    backgroundColor: C.green,
+    borderTopColor:    'rgba(255,255,255,0.4)',
+    borderBottomColor: 'rgba(0,0,0,0.3)',
+    shadowColor: C.green,
+  },
+  paraBtnEmoji: { fontSize: 38, marginBottom: 2 },
+  paraBtnText:  { fontSize: 17, fontWeight: '900', color: '#000', textAlign: 'center' },
+  hintText:     { textAlign: 'center', color: C.muted2, fontSize: 12, marginTop: 4 },
 
   // ── Driver matched card ───────────────────────────────────
   driverCard: {
@@ -900,11 +1263,148 @@ const s = StyleSheet.create({
   cancelLockedText: { color: C.muted, fontSize: 13, fontWeight: '700' },
   cancelLockedSub:  { color: C.muted2, fontSize: 11, textAlign: 'center' },
 
+  // ── Driver ID card ────────────────────────────────────────
+  driverIdCard: {
+    backgroundColor: C.accentDim,
+    borderRadius: 14, borderWidth: 1.5, borderColor: C.accent + '55',
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12,
+    marginBottom: 14, gap: 12,
+  },
+  driverIdLabel:      { fontSize: 10, color: C.accent, fontWeight: '700', letterSpacing: 1 },
+  driverIdName:       { fontSize: 19, fontWeight: '900', color: C.text, marginTop: 2 },
+  driverIdPlate: {
+    backgroundColor: C.surface3, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 8, alignItems: 'center',
+    borderWidth: 1, borderColor: C.border, minWidth: 72,
+  },
+  driverIdPlateLabel: { fontSize: 9, color: C.muted, fontWeight: '700', letterSpacing: 1 },
+  driverIdPlateNum:   { fontSize: 16, fontWeight: '900', color: C.text, marginTop: 2, letterSpacing: 1 },
+  driverIdETA: {
+    backgroundColor: 'rgba(34,197,94,0.15)', borderRadius: 10,
+    paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(34,197,94,0.35)', minWidth: 54,
+  },
+  driverIdETAVal:   { fontSize: 20, fontWeight: '900', color: C.green },
+  driverIdETALabel: { fontSize: 9, color: C.green, fontWeight: '700' },
+
+  // ── Chat thread ───────────────────────────────────────────
+  chatBox: {
+    maxHeight: 160,
+    backgroundColor: C.surface2, borderRadius: 14,
+    borderWidth: 1, borderColor: C.border,
+    marginBottom: 10, overflow: 'hidden',
+  },
+  chatContent: { padding: 10, gap: 6 },
+  chatEmpty:   { fontSize: 12, color: C.muted, textAlign: 'center', paddingVertical: 18, fontStyle: 'italic' },
+  msgBubble:   { maxWidth: '80%', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 },
+  msgBubbleMe:   { alignSelf: 'flex-end',   backgroundColor: C.accent },
+  msgBubbleThem: { alignSelf: 'flex-start', backgroundColor: C.surface3 },
+  msgText:    { fontSize: 14 },
+  msgTextMe:   { color: '#000', fontWeight: '600' },
+  msgTextThem: { color: C.text },
+
+  // ── Chat input ────────────────────────────────────────────
+  chatInputRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: C.surface2, borderRadius: 14,
+    borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 10, height: 48, gap: 6, marginBottom: 8,
+  },
+  chatInput:      { flex: 1, fontSize: 14, color: C.text },
+  fareToggleBtn:  {
+    width: 34, height: 34, borderRadius: 8,
+    backgroundColor: C.accentDim, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.accent + '44',
+  },
+  fareToggleText: { fontSize: 18 },
+  sendBtn:        {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
+  },
+  sendBtnText:    { fontSize: 18, fontWeight: '900', color: '#000' },
+
+  // ── Fare proposal input ───────────────────────────────────
+  fareInputRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: C.accentDim, borderRadius: 14,
+    borderWidth: 1, borderColor: C.accent + '55',
+    paddingHorizontal: 12, height: 52, gap: 8, marginBottom: 8,
+  },
+  fareRowLabel:  { fontSize: 13, color: C.accent, fontWeight: '700' },
+  fareInput:     { flex: 1, fontSize: 18, color: C.text, fontWeight: '700' },
+  fareSendBtn:   {
+    backgroundColor: C.accent, borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 7,
+  },
+  fareSendText:  { color: '#000', fontWeight: '800', fontSize: 13 },
+  fareCancelBtn: { padding: 6 },
+
+  // ── Fare bubble extras ────────────────────────────────────
+  msgBubbleFare: { borderWidth: 1.5, borderColor: C.accent + '66' },
+  agreeBtn:      {
+    marginTop: 8, backgroundColor: C.accent, borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 7, alignSelf: 'flex-start',
+  },
+  agreeBtnText:  { fontSize: 13, fontWeight: '800', color: '#000' },
+  agreedLabel:   { fontSize: 11, color: C.green, fontWeight: '700', marginTop: 6 },
+
+  // ── Trip summary card ────────────────────────────────────
+  tripCard: {
+    width: '100%', backgroundColor: C.surface2,
+    borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    marginVertical: 12, overflow: 'hidden',
+  },
+  tripRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 11,
+    borderBottomWidth: 1, borderBottomColor: C.border,
+  },
+  tripLabel: { fontSize: 10, color: C.muted, fontWeight: '700', letterSpacing: 0.8 },
+  tripValue: { fontSize: 14, fontWeight: '700', color: C.text, maxWidth: '60%', textAlign: 'right' },
+
+  // ── Report link ───────────────────────────────────────────
+  reportLinkBtn:  { marginTop: 14, padding: 8 },
+  reportLinkText: { fontSize: 12, color: C.red, fontWeight: '600', textDecorationLine: 'underline' },
+
+  // ── Report modal ──────────────────────────────────────────
+  reportOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'flex-end',
+  },
+  reportCard: {
+    backgroundColor: C.surface, borderTopLeftRadius: 26, borderTopRightRadius: 26,
+    padding: 22, paddingBottom: 40,
+    borderWidth: 1, borderBottomWidth: 0, borderColor: 'rgba(255,255,255,0.08)',
+  },
+  reportTitle:   { fontSize: 17, fontWeight: '800', color: C.text, marginBottom: 6 },
+  reportSub:     { fontSize: 13, color: C.muted, marginBottom: 14 },
+  reportOption:  {
+    padding: 13, borderRadius: 12,
+    borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.surface2, marginBottom: 8,
+  },
+  reportOptionSelected: { borderColor: C.accent, backgroundColor: C.accentDim },
+  reportOptionText:     { fontSize: 14, color: C.text, fontWeight: '500' },
+  reportDescInput: {
+    backgroundColor: C.surface2, borderRadius: 12,
+    borderWidth: 1, borderColor: C.border,
+    padding: 12, color: C.text, fontSize: 14,
+    marginTop: 6, marginBottom: 14,
+    minHeight: 70, textAlignVertical: 'top',
+  },
+  reportBtnRow:    { flexDirection: 'row', gap: 10 },
+  reportCancelBtn: {
+    flex: 1, padding: 14, borderRadius: 12,
+    backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border, alignItems: 'center',
+  },
+  reportSubmitBtn:  { flex: 2, padding: 14, borderRadius: 12, backgroundColor: C.red, alignItems: 'center' },
+  reportSubmitText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+
   // ── Arrived + Rating ─────────────────────────────────────
   arrivedWrap:  { alignItems: 'center', paddingVertical: 8 },
-  arrivedTitle: { fontSize: 30, fontWeight: '900', color: C.green, marginTop: 10 },
-  arrivedSub:   { fontSize: 14, color: C.muted, textAlign: 'center', marginTop: 8, lineHeight: 22 },
-  ratePrompt:   { fontSize: 16, fontWeight: '700', color: C.text, marginTop: 16 },
+  arrivedTitle: { fontSize: 28, fontWeight: '900', color: C.green, marginTop: 8 },
+  ratePrompt:   { fontSize: 16, fontWeight: '700', color: C.text, marginTop: 4 },
   rateLabel:    { fontSize: 14, color: C.accent, fontWeight: '600', marginBottom: 4 },
   doneBtn:      { backgroundColor: C.accent, borderRadius: 16, paddingHorizontal: 32, paddingVertical: 16, marginTop: 10 },
   doneBtnText:  { fontSize: 15, fontWeight: '800', color: '#000' },

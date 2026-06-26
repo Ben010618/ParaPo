@@ -310,3 +310,87 @@ do $$ begin
   alter publication supabase_realtime add table ride_messages;
 exception when duplicate_object then null;
 end $$;
+
+-- ── AGREED FARE ───────────────────────────────────────────────
+alter table ride_requests add column if not exists agreed_fare integer;
+
+-- ── ACCOUNT SAFETY FLAGS ──────────────────────────────────────
+alter table profiles add column if not exists is_disabled    boolean default false;
+alter table profiles add column if not exists warning_count  integer default 0;
+alter table profiles add column if not exists disabled_reason text;
+
+-- Allow admins to update (warn/disable) any profile
+drop policy if exists "Admins can update any profile" on profiles;
+create policy "Admins can update any profile"
+  on profiles for update using (
+    exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+  );
+
+-- ── REPORTS ───────────────────────────────────────────────────
+create table if not exists reports (
+  id          uuid default gen_random_uuid() primary key,
+  reporter_id uuid references profiles(id) on delete set null,
+  reported_id uuid references profiles(id) on delete set null,
+  ride_id     uuid references ride_requests(id) on delete set null,
+  reason      text not null,
+  description text,
+  status      text not null default 'pending'
+              check (status in ('pending','reviewed','dismissed','actioned')),
+  created_at  timestamptz default now()
+);
+
+alter table reports enable row level security;
+
+drop policy if exists "Users can submit reports"    on reports;
+drop policy if exists "Users can read own reports"  on reports;
+drop policy if exists "Admins can read all reports" on reports;
+drop policy if exists "Admins can update reports"   on reports;
+
+create policy "Users can submit reports"
+  on reports for insert with check (auth.uid() = reporter_id);
+create policy "Users can read own reports"
+  on reports for select using (auth.uid() = reporter_id);
+create policy "Admins can read all reports"
+  on reports for select using (
+    exists (select 1 from profiles where id = auth.uid() and role = 'admin'));
+create policy "Admins can update reports"
+  on reports for update using (
+    exists (select 1 from profiles where id = auth.uid() and role = 'admin'));
+
+do $$ begin
+  alter publication supabase_realtime add table reports;
+exception when duplicate_object then null;
+end $$;
+
+-- ── ADMIN MESSAGES ────────────────────────────────────────────
+create table if not exists admin_messages (
+  id         uuid default gen_random_uuid() primary key,
+  admin_id   uuid references profiles(id) on delete set null,
+  user_id    uuid references profiles(id) on delete cascade,
+  message    text not null,
+  read       boolean default false,
+  created_at timestamptz default now()
+);
+
+alter table admin_messages enable row level security;
+
+drop policy if exists "Users can read own admin messages"  on admin_messages;
+drop policy if exists "Users can mark messages read"       on admin_messages;
+drop policy if exists "Admins can send messages"           on admin_messages;
+drop policy if exists "Admins can read all admin messages" on admin_messages;
+
+create policy "Users can read own admin messages"
+  on admin_messages for select using (auth.uid() = user_id);
+create policy "Users can mark messages read"
+  on admin_messages for update using (auth.uid() = user_id);
+create policy "Admins can send messages"
+  on admin_messages for insert with check (
+    exists (select 1 from profiles where id = auth.uid() and role = 'admin'));
+create policy "Admins can read all admin messages"
+  on admin_messages for select using (
+    exists (select 1 from profiles where id = auth.uid() and role = 'admin'));
+
+do $$ begin
+  alter publication supabase_realtime add table admin_messages;
+exception when duplicate_object then null;
+end $$;

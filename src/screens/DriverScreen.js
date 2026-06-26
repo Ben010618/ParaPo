@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
+  View, Text, TextInput, TouchableOpacity, StyleSheet,
   Alert, Animated, Switch, Vibration, ScrollView, Image, Linking,
+  Modal, ActivityIndicator,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
@@ -28,11 +29,21 @@ export default function DriverScreen() {
   const reqCardAnim    = useRef(new Animated.Value(500)).current;
   const activeCardAnim = useRef(new Animated.Value(500)).current;
   const timerTimeout   = useRef(null);
+  const msgScrollRef   = useRef(null);
 
-  const [driverState,    setDriverState]    = useState(DS.OFFLINE);
-  const [toggling,       setToggling]       = useState(false);
-  const [ridesCount,     setRidesCount]     = useState(0);
-  const [onlineSeconds,  setOnlineSeconds]  = useState(0);
+  const [driverState,      setDriverState]      = useState(DS.OFFLINE);
+  const [toggling,         setToggling]         = useState(false);
+  const [ridesCount,       setRidesCount]       = useState(0);
+  const [onlineSeconds,    setOnlineSeconds]    = useState(0);
+  const [freeText,         setFreeText]         = useState('');
+  const [fareInput,        setFareInput]        = useState('');
+  const [showFareInput,    setShowFareInput]    = useState(false);
+  const [showReportModal,  setShowReportModal]  = useState(false);
+  const [selectedReason,   setSelectedReason]   = useState('');
+  const [reportDesc,       setReportDesc]       = useState('');
+  const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [lastRideId,       setLastRideId]       = useState(null);
+  const [lastPassengerId,  setLastPassengerId]  = useState(null);
 
   useEffect(() => { driverStateRef.current = driverState; }, [driverState]);
 
@@ -186,12 +197,17 @@ export default function DriverScreen() {
 
   const handleCompleteRide = async () => {
     if (!activeRide?.id) return;
+    const rideId = activeRide.id;
+    const passId = incomingPassengerProfile?.id ?? null;
     hideActiveCard(async () => {
       try {
-        await completeRide(activeRide.id);
+        await completeRide(rideId);
         if (!mountedRef.current) return;
         unsubscribeMessages();
+        setLastRideId(rideId);
+        setLastPassengerId(passId);
         setRidesCount((p) => p + 1);
+        setFreeText(''); setFareInput(''); setShowFareInput(false);
         setDriverState(DS.COMPLETE);
       } catch (e) {
         if (mountedRef.current) Alert.alert('Error', e?.message ?? 'Could not complete ride.');
@@ -223,11 +239,48 @@ export default function DriverScreen() {
     });
   }, [activeRide?.pickup_lat, activeRide?.pickup_lng]);
 
-  // C1 — send a canned message to passenger
+  // C1 — send a message to passenger
   const handleSendMessage = useCallback((msg) => {
     if (!activeRide?.id || !session?.user?.id) return;
     sendMessage(activeRide.id, session.user.id, 'driver', msg);
   }, [activeRide?.id, session?.user?.id, sendMessage]);
+
+  const handleSendFree = useCallback(() => {
+    if (!freeText.trim()) return;
+    handleSendMessage(freeText.trim());
+    setFreeText('');
+  }, [freeText, handleSendMessage]);
+
+  const handleSendFare = useCallback(() => {
+    const amount = fareInput.replace(/[^0-9]/g, '');
+    if (!amount) return;
+    handleSendMessage(`💰 Fare quote: ₱${amount}`);
+    setFareInput('');
+    setShowFareInput(false);
+  }, [fareInput, handleSendMessage]);
+
+  const handleSubmitReport = useCallback(async () => {
+    if (!selectedReason || !session?.user?.id) return;
+    setReportSubmitting(true);
+    try {
+      const { error } = await supabase.from('reports').insert({
+        reporter_id: session.user.id,
+        reported_id: lastPassengerId,
+        ride_id:     lastRideId,
+        reason:      selectedReason,
+        description: reportDesc.trim() || null,
+      });
+      if (error) throw error;
+      setShowReportModal(false);
+      setSelectedReason('');
+      setReportDesc('');
+      Alert.alert('Report Submitted', 'Admin will review this within 24 hours.');
+    } catch (e) {
+      Alert.alert('Error', e?.message ?? 'Could not submit report. Try again.');
+    } finally {
+      setReportSubmitting(false);
+    }
+  }, [selectedReason, reportDesc, session?.user?.id, lastPassengerId, lastRideId]);
 
   const arrivedBtnLabel = driverState === DS.PICKUP ? "I've Arrived at Pickup" : 'Complete Ride ✓';
 
@@ -331,9 +384,64 @@ export default function DriverScreen() {
             <TouchableOpacity style={s.doneBtn} onPress={handleDone} activeOpacity={0.85}>
               <Text style={s.doneBtnText}>Done</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={s.reportLinkBtn} onPress={() => setShowReportModal(true)}>
+              <Text style={s.reportLinkText}>⚠️ Report a passenger issue</Text>
+            </TouchableOpacity>
           </View>
         )}
       </ScrollView>
+
+      {/* ── REPORT MODAL ── */}
+      <Modal visible={showReportModal} transparent animationType="slide" statusBarTranslucent onRequestClose={() => setShowReportModal(false)}>
+        <View style={s.reportOverlay}>
+          <View style={s.reportCard}>
+            <Text style={s.reportTitle}>⚠️ Report Passenger</Text>
+            <Text style={s.reportSub}>Select the reason:</Text>
+            {[
+              'Passenger did not show up',
+              'Passenger refused to pay agreed fare',
+              'Passenger was verbally abusive',
+              'Passenger threatened driver',
+              'Other',
+            ].map((reason) => (
+              <TouchableOpacity
+                key={reason}
+                style={[s.reportOption, selectedReason === reason && s.reportOptionSelected]}
+                onPress={() => setSelectedReason(reason)}
+                activeOpacity={0.8}
+              >
+                <Text style={[s.reportOptionText, selectedReason === reason && { color: C.accent }]}>
+                  {reason}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TextInput
+              style={s.reportDescInput}
+              placeholder="Additional details (optional)…"
+              placeholderTextColor={C.muted}
+              value={reportDesc}
+              onChangeText={setReportDesc}
+              multiline
+              numberOfLines={3}
+            />
+            <View style={s.reportBtnRow}>
+              <TouchableOpacity style={s.reportCancelBtn} onPress={() => { setShowReportModal(false); setSelectedReason(''); setReportDesc(''); }} activeOpacity={0.8}>
+                <Text style={{ color: C.muted, fontWeight: '600' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.reportSubmitBtn, (!selectedReason || reportSubmitting) && { opacity: 0.4 }]}
+                onPress={handleSubmitReport}
+                disabled={!selectedReason || reportSubmitting}
+                activeOpacity={0.85}
+              >
+                {reportSubmitting
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={s.reportSubmitText}>Submit Report</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* ── INCOMING REQUEST CARD ── */}
       <Animated.View style={[s.slideCard, { transform: [{ translateY: reqCardAnim }] }]}>
@@ -445,36 +553,113 @@ export default function DriverScreen() {
           </View>
         </View>
 
-        {/* A1 — Destination display */}
-        {activeRide?.destination_text && (
+        {/* Destination + agreed fare */}
+        {(activeRide?.destination_text || activeRide?.agreed_fare) ? (
           <View style={s.destRow}>
-            <Text style={s.destRowLabel}>GOING TO</Text>
-            <Text style={s.destRowText} numberOfLines={1}>
-              📍 {activeRide.destination_text}
-            </Text>
+            {activeRide?.destination_text ? (
+              <>
+                <Text style={s.destRowLabel}>GOING TO</Text>
+                <Text style={s.destRowText} numberOfLines={1}>📍 {activeRide.destination_text}</Text>
+              </>
+            ) : null}
+            {activeRide?.agreed_fare ? (
+              <Text style={[s.destRowText, { color: C.accent, fontWeight: '900', marginTop: 4 }]}>
+                💰 Agreed fare: ₱{activeRide.agreed_fare}
+              </Text>
+            ) : null}
           </View>
-        )}
+        ) : null}
 
-        {/* C1 — Last passenger message */}
-        {lastPaxMsg && (
-          <View style={s.incomingMsgWrap}>
-            <Text style={s.incomingMsgLabel}>Passenger says:</Text>
-            <Text style={s.incomingMsgText}>"{lastPaxMsg.message}"</Text>
-          </View>
-        )}
+        {/* ── CHAT THREAD ── */}
+        <View style={s.chatBox}>
+          <ScrollView
+            ref={msgScrollRef}
+            nestedScrollEnabled
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={s.chatContent}
+            onContentSizeChange={() => msgScrollRef.current?.scrollToEnd({ animated: true })}
+          >
+            {rideMessages.length === 0 ? (
+              <Text style={s.chatEmpty}>No messages yet. Quote a fare or send a message.</Text>
+            ) : (
+              rideMessages.map((msg) => {
+                const isMe = msg.sender_role === 'driver';
+                return (
+                  <View key={msg.id ?? msg.created_at}
+                    style={[s.msgBubble, isMe ? s.msgBubbleMe : s.msgBubbleThem]}>
+                    <Text style={[s.msgText, isMe ? s.msgTextMe : s.msgTextThem]}>
+                      {msg.message}
+                    </Text>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+        </View>
 
-        {/* C1 — Canned messages */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.cannedRow}>
+        {/* Quick-reply chips */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.cannedRow}>
           {DRIVER_CANNED.map((msg) => (
-            <TouchableOpacity
-              key={msg} style={s.cannedBtn}
-              onPress={() => handleSendMessage(msg)} activeOpacity={0.75}
-            >
+            <TouchableOpacity key={msg} style={s.cannedBtn} onPress={() => handleSendMessage(msg)} activeOpacity={0.75}>
               <Text style={s.cannedText}>{msg}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
+
+        {/* Fare bargaining / free-text input */}
+        {showFareInput ? (
+          <View style={s.fareInputRow}>
+            <Text style={s.fareRowLabel}>💰 Quote</Text>
+            <TextInput
+              style={s.fareInput}
+              placeholder="Amount (e.g. 30)"
+              placeholderTextColor={C.muted}
+              keyboardType="numeric"
+              value={fareInput}
+              onChangeText={setFareInput}
+              autoFocus
+              returnKeyType="send"
+              onSubmitEditing={handleSendFare}
+            />
+            <TouchableOpacity
+              style={[s.fareSendBtn, !fareInput.trim() && { opacity: 0.4 }]}
+              onPress={handleSendFare}
+              disabled={!fareInput.trim()}
+              activeOpacity={0.8}
+            >
+              <Text style={s.fareSendText}>₱ Send</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => { setShowFareInput(false); setFareInput(''); }}
+              style={s.fareCancelBtn}
+            >
+              <Text style={{ color: C.muted, fontSize: 16 }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={s.chatInputRow}>
+            <TouchableOpacity style={s.fareToggleBtn} onPress={() => setShowFareInput(true)} activeOpacity={0.8}>
+              <Text style={s.fareToggleText}>💰</Text>
+            </TouchableOpacity>
+            <TextInput
+              style={s.chatInput}
+              placeholder="Type a message…"
+              placeholderTextColor={C.muted}
+              value={freeText}
+              onChangeText={setFreeText}
+              returnKeyType="send"
+              onSubmitEditing={handleSendFree}
+            />
+            <TouchableOpacity
+              style={[s.sendBtn, !freeText.trim() && { opacity: 0.35 }]}
+              onPress={handleSendFree}
+              disabled={!freeText.trim()}
+              activeOpacity={0.8}
+            >
+              <Text style={s.sendBtnText}>↑</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* D1 — Navigate + Arrived row */}
         <View style={s.actionRow}>
@@ -677,7 +862,90 @@ const s = StyleSheet.create({
   destRowLabel: { fontSize: 10, color: C.accent, fontWeight: '700', letterSpacing: 0.8 },
   destRowText:  { fontSize: 14, color: C.text, fontWeight: '600', marginTop: 2 },
 
-  // ── Messages ──────────────────────────────────────────────
+  // ── Chat thread ───────────────────────────────────────────
+  chatBox: {
+    maxHeight: 150,
+    backgroundColor: C.surface3, borderRadius: 14,
+    borderWidth: 1, borderColor: C.border,
+    marginBottom: 10, overflow: 'hidden',
+  },
+  chatContent: { padding: 10, gap: 6 },
+  chatEmpty:   { fontSize: 12, color: C.muted, textAlign: 'center', paddingVertical: 16, fontStyle: 'italic' },
+  msgBubble:   { maxWidth: '80%', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 },
+  msgBubbleMe:   { alignSelf: 'flex-end',   backgroundColor: C.accent },
+  msgBubbleThem: { alignSelf: 'flex-start', backgroundColor: C.surface2 },
+  msgText:     { fontSize: 13 },
+  msgTextMe:   { color: '#000', fontWeight: '600' },
+  msgTextThem: { color: C.text },
+
+  chatInputRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: C.surface3, borderRadius: 12,
+    borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 10, height: 46, gap: 6, marginBottom: 8,
+  },
+  chatInput:      { flex: 1, fontSize: 14, color: C.text },
+  fareToggleBtn:  {
+    width: 32, height: 32, borderRadius: 8,
+    backgroundColor: C.accentDim, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.accent + '44',
+  },
+  fareToggleText: { fontSize: 17 },
+  sendBtn:        {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
+  },
+  sendBtnText:    { fontSize: 17, fontWeight: '900', color: '#000' },
+  fareInputRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: C.accentDim, borderRadius: 12,
+    borderWidth: 1, borderColor: C.accent + '55',
+    paddingHorizontal: 12, height: 50, gap: 8, marginBottom: 8,
+  },
+  fareRowLabel:  { fontSize: 12, color: C.accent, fontWeight: '700' },
+  fareInput:     { flex: 1, fontSize: 18, color: C.text, fontWeight: '700' },
+  fareSendBtn:   {
+    backgroundColor: C.accent, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 6,
+  },
+  fareSendText:  { color: '#000', fontWeight: '800', fontSize: 13 },
+  fareCancelBtn: { padding: 6 },
+
+  // ── Report link ────────────────────────────────────────────
+  reportLinkBtn:  { marginTop: 12, padding: 8 },
+  reportLinkText: { fontSize: 12, color: C.red, fontWeight: '600', textDecorationLine: 'underline', textAlign: 'center' },
+
+  // ── Report modal ───────────────────────────────────────────
+  reportOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' },
+  reportCard: {
+    backgroundColor: C.surface, borderTopLeftRadius: 26, borderTopRightRadius: 26,
+    padding: 22, paddingBottom: 40,
+    borderWidth: 1, borderBottomWidth: 0, borderColor: 'rgba(255,255,255,0.08)',
+  },
+  reportTitle:   { fontSize: 17, fontWeight: '800', color: C.text, marginBottom: 6 },
+  reportSub:     { fontSize: 13, color: C.muted, marginBottom: 14 },
+  reportOption:  {
+    padding: 13, borderRadius: 12, borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.surface2, marginBottom: 8,
+  },
+  reportOptionSelected: { borderColor: C.accent, backgroundColor: C.accentDim },
+  reportOptionText:     { fontSize: 14, color: C.text, fontWeight: '500' },
+  reportDescInput: {
+    backgroundColor: C.surface2, borderRadius: 12,
+    borderWidth: 1, borderColor: C.border,
+    padding: 12, color: C.text, fontSize: 14,
+    marginTop: 6, marginBottom: 14,
+    minHeight: 70, textAlignVertical: 'top',
+  },
+  reportBtnRow:    { flexDirection: 'row', gap: 10 },
+  reportCancelBtn: {
+    flex: 1, padding: 14, borderRadius: 12,
+    backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border, alignItems: 'center',
+  },
+  reportSubmitBtn:  { flex: 2, padding: 14, borderRadius: 12, backgroundColor: C.red, alignItems: 'center' },
+  reportSubmitText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+
+  // ── Messages (legacy, kept for safety) ───────────────────
   incomingMsgWrap: {
     backgroundColor: 'rgba(59,130,246,0.1)', borderRadius: 12,
     borderWidth: 1, borderColor: 'rgba(59,130,246,0.2)',

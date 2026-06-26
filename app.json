@@ -14,6 +14,11 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.parapo.app",
+      "infoPlist": {
+        "UIBackgroundModes": ["location"],
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "ParaPo shares your location while online so passengers can find you.",
+        "NSLocationAlwaysUsageDescription": "ParaPo needs background location so passengers can track you during a ride."
+      },
       "config": {
         "googleMapsApiKey": "$(GOOGLE_MAPS_API_KEY_IOS)"
       }
@@ -22,8 +27,7 @@
       "package": "com.parapo.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png",
+        "monochromeImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#1565C0"
       },
       "config": {
@@ -52,7 +56,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/android-icon-monochrome.png",
+          "icon": "./assets/icon.png",
           "color": "#1565C0"
         }
       ]
