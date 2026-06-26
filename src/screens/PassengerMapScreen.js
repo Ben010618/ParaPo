@@ -712,23 +712,21 @@ export default function PassengerMapScreen() {
             activeOpacity={0.82}
             disabled={rideState === RS.SEARCHING || rideState === RS.MATCHED}
           >
-            {/* 3-D dome highlight */}
-            <View style={s.paraBtnShine} pointerEvents="none" />
             {rideState === RS.SEARCHING ? (
               <>
-                <ActivityIndicator color={C.accent} size="large" />
-                <Text style={[s.paraBtnText, { color: C.accent, fontSize: 12, marginTop: 8 }]}>
-                  Hailing…
-                </Text>
+                <ActivityIndicator color={C.accent} size="small" />
+                <Text style={[s.paraBtnText, { color: C.muted }]}>Finding your driver…</Text>
+              </>
+            ) : rideState === RS.MATCHED ? (
+              <>
+                <Text style={[s.paraBtnEmoji, { fontSize: 20 }]}>✓</Text>
+                <Text style={[s.paraBtnText, { color: '#fff' }]}>Driver is on the way!</Text>
               </>
             ) : (
               <>
-                <Text style={s.paraBtnEmoji}>
-                  {rideState === RS.MATCHED ? '🛺' : '🤚'}
-                </Text>
-                <Text style={[s.paraBtnText, rideState === RS.MATCHED && { color: '#fff', fontSize: 14 }]}>
-                  {rideState === RS.MATCHED ? 'On the way!' : 'Para Po!'}
-                </Text>
+                <Text style={s.paraBtnEmoji}>🛺</Text>
+                <Text style={s.paraBtnText}>Para Po!</Text>
+                <Text style={s.paraBtnArrow}>›</Text>
               </>
             )}
           </TouchableOpacity>
@@ -1167,43 +1165,34 @@ const s = StyleSheet.create({
   destActiveText:  { fontSize: 14, color: C.text, fontWeight: '600', marginTop: 2 },
 
   paraBtn: {
-    width: 120, height: 120, borderRadius: 60,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 62,
+    borderRadius: 18,
     backgroundColor: C.accent,
-    alignItems: 'center', justifyContent: 'center',
-    alignSelf: 'center',
-    marginVertical: 10,
-    // 3-D border: lighter top edge, darker bottom edge
-    borderWidth: 2,
-    borderTopColor:    'rgba(255,255,255,0.45)',
-    borderLeftColor:   'rgba(255,255,255,0.22)',
-    borderRightColor:  'rgba(0,0,0,0.18)',
-    borderBottomColor: 'rgba(0,0,0,0.32)',
-    // depth shadow
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 10,
-    elevation: 16,
-  },
-  paraBtnShine: {
-    position: 'absolute', top: 10, left: 18,
-    width: 56, height: 26, borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.22)',
+    marginVertical: 12,
+    gap: 10,
+    shadowColor: C.accent,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.4,
+    shadowRadius: 14,
+    elevation: 12,
   },
   paraBtnSearching: {
     backgroundColor: C.surface2,
-    borderColor: C.border,
-    shadowOpacity: 0, elevation: 4,
+    borderWidth: 1, borderColor: C.border,
+    shadowOpacity: 0, elevation: 2,
   },
   paraBtnMatched: {
     backgroundColor: C.green,
-    borderTopColor:    'rgba(255,255,255,0.4)',
-    borderBottomColor: 'rgba(0,0,0,0.3)',
     shadowColor: C.green,
+    shadowOpacity: 0.35,
   },
-  paraBtnEmoji: { fontSize: 38, marginBottom: 2 },
-  paraBtnText:  { fontSize: 17, fontWeight: '900', color: '#000', textAlign: 'center' },
-  hintText:     { textAlign: 'center', color: C.muted2, fontSize: 12, marginTop: 4 },
+  paraBtnEmoji: { fontSize: 22 },
+  paraBtnText:  { fontSize: 17, fontWeight: '800', color: '#000', letterSpacing: 0.2 },
+  paraBtnArrow: { position: 'absolute', right: 22, fontSize: 22, fontWeight: '900', color: 'rgba(0,0,0,0.3)' },
+  hintText:     { textAlign: 'center', color: C.muted2, fontSize: 12, marginTop: 2 },
 
   // ── Driver matched card ───────────────────────────────────
   driverCard: {
