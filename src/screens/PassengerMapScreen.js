@@ -22,27 +22,42 @@ const PAX_CANNED = [
   "Where are you? 🛺",
 ];
 
+const TRIKE_ICON = require('../../assets/iconinthemap.png');
+
 // ── Driver map marker ─────────────────────────────────────────
 function DriverMarker({ pulse = false }) {
   return (
     <View style={mk.wrap}>
-      <View style={[mk.outerRing, pulse && mk.outerRingPulse]} />
-      <View style={mk.inner}><Text style={{ fontSize: 20 }}>🛺</Text></View>
+      {/* Outer glow ring */}
+      <View style={[mk.glowOuter, pulse && mk.glowOuterPulse]} />
+      {/* Inner glow halo */}
+      <View style={[mk.glowInner, pulse && mk.glowInnerPulse]} />
+      {/* Icon */}
+      <Image source={TRIKE_ICON} style={mk.icon} resizeMode="contain" />
     </View>
   );
 }
 const mk = StyleSheet.create({
-  wrap:          { width: 54, height: 54, alignItems: 'center', justifyContent: 'center' },
-  outerRing:     {
-    position: 'absolute', width: 54, height: 54, borderRadius: 27,
-    backgroundColor: 'rgba(255,193,7,0.12)',
-    borderWidth: 1.5, borderColor: 'rgba(255,193,7,0.35)',
+  wrap: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
+  glowOuter: {
+    position: 'absolute', width: 64, height: 64, borderRadius: 32,
+    backgroundColor: 'rgba(255,193,7,0.08)',
+    borderWidth: 1, borderColor: 'rgba(255,193,7,0.2)',
   },
-  outerRingPulse: { borderColor: C.accent, backgroundColor: 'rgba(255,193,7,0.22)' },
-  inner:         {
-    width: 36, height: 36, borderRadius: 18, backgroundColor: C.accent,
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: C.accent, shadowOpacity: 1, shadowRadius: 12, elevation: 10,
+  glowOuterPulse: {
+    backgroundColor: 'rgba(255,193,7,0.18)',
+    borderColor: 'rgba(255,193,7,0.55)',
+  },
+  glowInner: {
+    position: 'absolute', width: 44, height: 44, borderRadius: 22,
+    backgroundColor: 'rgba(255,193,7,0.15)',
+  },
+  glowInnerPulse: {
+    backgroundColor: 'rgba(255,193,7,0.32)',
+  },
+  icon: {
+    width: 36, height: 36,
+    shadowColor: C.accent, shadowOpacity: 0.9, shadowRadius: 10, elevation: 8,
   },
 });
 
@@ -785,7 +800,7 @@ export default function PassengerMapScreen() {
                     />
                   ) : (
                     <View style={s.matchAvatar}>
-                      <Text style={{ fontSize: 34 }}>🛺</Text>
+                      <Image source={TRIKE_ICON} style={{ width: 44, height: 44 }} resizeMode="contain" />
                     </View>
                   )}
                 </View>
