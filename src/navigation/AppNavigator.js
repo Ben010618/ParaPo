@@ -10,7 +10,7 @@ import { useAuthStore } from '../store/authStore';
 import { C } from '../theme/colors';
 
 const Tab = createBottomTabNavigator();
-const TRAYSIKEL_IMAGE = require('../assets/traysikel.png');
+const TRAYSIKEL_IMAGE = require('../../assets/traysikel.png');
 
 function TabIcon({ emoji, focused }) {
   return (
