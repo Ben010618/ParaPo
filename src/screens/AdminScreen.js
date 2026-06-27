@@ -1,13 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  View, Text, TextInput, ScrollView, StyleSheet, TouchableOpacity,
+  View, Text, TextInput, Image, ScrollView, StyleSheet, TouchableOpacity,
   RefreshControl, Modal, ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
+
+const TRAYSIKEL_IMAGE = require('../../assets/traysikel.png');
 import { C } from '../theme/colors';
 
-const ACTIVITY_ICONS = { accepted: '🛺', completed: '✅', pending: '📍', declined: '❌' };
+const ACTIVITY_ICONS = { accepted: '→', completed: '✅', pending: '📍', declined: '❌' };
 
 const REPORT_REASONS = {
   no_show:          'No-show',
@@ -228,7 +230,7 @@ export default function AdminScreen() {
   // ── UI ────────────────────────────────────────────────────────────────────
 
   const STAT_CARDS = [
-    { icon: '🛺', val: stats.driversOnline, lbl: 'Drivers Online', color: C.green },
+    { image: true, val: stats.driversOnline, lbl: 'Drivers Online', color: C.green },
     { icon: '🚀', val: stats.activeRides,   lbl: 'Active Rides',   color: C.orange },
     { icon: '✅', val: stats.ridesToday,    lbl: 'Rides Today',    color: C.blue },
     { icon: '⭐', val: stats.completedRides ?? stats.ridesToday, lbl: 'Completed', color: C.accent },
@@ -259,7 +261,13 @@ export default function AdminScreen() {
         <View style={s.statsGrid}>
           {STAT_CARDS.map((card) => (
             <View key={card.lbl} style={s.statCard}>
-              <Text style={s.statIcon}>{card.icon}</Text>
+              {card.image ? (
+                <View style={s.statTrikeWrap}>
+                  <Image source={TRAYSIKEL_IMAGE} style={s.statTrikeImg} resizeMode="contain" />
+                </View>
+              ) : (
+                <Text style={s.statIcon}>{card.icon}</Text>
+              )}
               <Text style={[s.statVal, { color: card.color }]}>{card.val}</Text>
               <Text style={s.statLbl}>{card.lbl}</Text>
             </View>
@@ -286,11 +294,11 @@ export default function AdminScreen() {
                 <View style={s.reportMeta}>
                   <Text style={s.reporterText}>
                     <Text style={{ color: C.blue }}>
-                      {r.reporter?.role === 'driver' ? '🛺' : '🤚'} {r.reporter?.name ?? 'Unknown'}
+                      [{r.reporter?.role === 'driver' ? 'Driver' : 'Passenger'}] {r.reporter?.name ?? 'Unknown'}
                     </Text>
                     {' reported '}
                     <Text style={{ color: C.red }}>
-                      {r.reported?.role === 'driver' ? '🛺' : '🤚'} {r.reported?.name ?? 'Unknown'}
+                      [{r.reported?.role === 'driver' ? 'Driver' : 'Passenger'}] {r.reported?.name ?? 'Unknown'}
                     </Text>
                   </Text>
                   <View style={s.reasonTag}>
@@ -339,7 +347,9 @@ export default function AdminScreen() {
               const plateNumber = d.profile?.plate_number ?? '—';
               return (
                 <View key={d.driver_id ?? i} style={[s.driverRow, i === drivers.length - 1 && { borderBottomWidth: 0 }]}>
-                  <View style={s.driverAv}><Text style={{ fontSize: 18 }}>🛺</Text></View>
+                  <View style={s.driverAv}>
+                    <Image source={TRAYSIKEL_IMAGE} style={s.driverAvImg} resizeMode="contain" />
+                  </View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.driverName}>{driverName}</Text>
                     <Text style={s.driverMeta}>
@@ -402,7 +412,7 @@ export default function AdminScreen() {
                 <View key={ride.id ?? i} style={[s.rideRow, i === Math.min(7, recentRides.length - 1) && { borderBottomWidth: 0 }]}>
                   <View style={{ flex: 1 }}>
                     <Text style={s.rideNames} numberOfLines={1}>
-                      🤚 {passengerName} → 🛺 {driverName}
+                      {passengerName} → {driverName}
                     </Text>
                     {ride.agreed_fare ? (
                       <Text style={s.rideFare}>💰 ₱{ride.agreed_fare}</Text>
@@ -488,7 +498,14 @@ const s = StyleSheet.create({
     width: '47%', backgroundColor: C.surface, borderRadius: 16,
     padding: 16, borderWidth: 1, borderColor: C.border,
   },
-  statIcon: { fontSize: 20, marginBottom: 8 },
+  statIcon:     { fontSize: 20, marginBottom: 8 },
+  statTrikeWrap: {
+    width: 40, height: 32, borderRadius: 8,
+    backgroundColor: C.accent,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+    marginBottom: 8,
+  },
+  statTrikeImg: { width: 36, height: 29 },
   statVal:  { fontSize: 26, fontWeight: '900' },
   statLbl:  { fontSize: 12, color: C.muted, marginTop: 3 },
 
@@ -550,8 +567,10 @@ const s = StyleSheet.create({
   },
   driverAv: {
     width: 36, height: 36, borderRadius: 18,
-    backgroundColor: C.surface2, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
   },
+  driverAvImg: { width: 30, height: 24 },
   driverName:    { fontSize: 13, fontWeight: '600', color: C.text },
   driverMeta:    { fontSize: 11, color: C.muted, marginTop: 2 },
   driverActions: { alignItems: 'center', gap: 6 },

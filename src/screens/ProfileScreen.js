@@ -9,9 +9,11 @@ import { useRideStore } from '../store/rideStore';
 import { supabase } from '../lib/supabase';
 import { C } from '../theme/colors';
 
+const TRAYSIKEL_IMAGE = require('../../assets/traysikel.png');
+
 const ROLE_CONFIG = {
   passenger: { emoji: '🤚', label: 'Pasahero', color: C.blue,   dim: C.blueDim },
-  driver:    { emoji: '🛺', label: 'Drayber',  color: C.accent, dim: C.accentDim },
+  driver:    { emoji: null,  label: 'Drayber',  color: C.accent, dim: C.accentDim, useImage: true },
   admin:     { emoji: '📊', label: 'Admin',    color: C.purple, dim: 'rgba(168,85,247,0.12)' },
 };
 
@@ -250,7 +252,13 @@ export default function ProfileScreen() {
         </TouchableOpacity>
         <Text style={s.name}>{fullName}</Text>
         <View style={[s.roleBadge, { backgroundColor: rc.dim, borderColor: rc.color + '44' }]}>
-          <Text style={s.roleEmoji}>{rc.emoji}</Text>
+          {rc.useImage ? (
+            <View style={s.roleTrikeWrap}>
+              <Image source={TRAYSIKEL_IMAGE} style={s.roleTrikeImg} resizeMode="contain" />
+            </View>
+          ) : (
+            <Text style={s.roleEmoji}>{rc.emoji}</Text>
+          )}
           <Text style={[s.roleLabel, { color: rc.color }]}>{rc.label}</Text>
         </View>
         <Text style={s.avatarHint}>Tap photo to update</Text>
@@ -269,7 +277,13 @@ export default function ProfileScreen() {
         </View>
         <View style={s.statDivider} />
         <View style={s.statBox}>
-          <Text style={s.statVal}>{isDriver ? '🛺' : '🤚'}</Text>
+          {isDriver ? (
+            <View style={s.statTrikeWrap}>
+              <Image source={TRAYSIKEL_IMAGE} style={s.statTrikeImg} resizeMode="contain" />
+            </View>
+          ) : (
+            <Text style={s.statVal}>🤚</Text>
+          )}
           <Text style={s.statLbl}>{isDriver ? 'Driver' : 'Passenger'}</Text>
         </View>
       </View>
@@ -354,7 +368,7 @@ export default function ProfileScreen() {
         <Text style={s.signOutText}>Mag-logout</Text>
       </TouchableOpacity>
 
-      <Text style={s.footer}>ParaPo v1.0.0 · Para sa komunidad 🛺</Text>
+      <Text style={s.footer}>ParaPo v1.0.0 · Para sa komunidad</Text>
 
       {/* ── EDIT PROFILE MODAL ── */}
       <Modal
@@ -446,7 +460,19 @@ const s = StyleSheet.create({
     borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6,
     borderWidth: 1, marginTop: 10,
   },
-  roleEmoji: { fontSize: 15 },
+  roleEmoji:    { fontSize: 15 },
+  roleTrikeWrap: {
+    width: 26, height: 20, borderRadius: 5,
+    backgroundColor: C.accent,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+  },
+  roleTrikeImg: { width: 23, height: 18 },
+  statTrikeWrap: {
+    width: 40, height: 32, borderRadius: 8,
+    backgroundColor: C.accent,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+  },
+  statTrikeImg: { width: 36, height: 29 },
   roleLabel: { fontWeight: '700', fontSize: 14 },
 
   // ── Stats ─────────────────────────────────────────────────

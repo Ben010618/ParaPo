@@ -1,6 +1,6 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, ActivityIndicator } from 'react-native';
+import { Text, View, Image, ActivityIndicator } from 'react-native';
 import PassengerMapScreen from '../screens/PassengerMapScreen';
 import DriverScreen from '../screens/DriverScreen';
 import AdminScreen from '../screens/AdminScreen';
@@ -10,11 +10,26 @@ import { useAuthStore } from '../store/authStore';
 import { C } from '../theme/colors';
 
 const Tab = createBottomTabNavigator();
+const TRAYSIKEL_IMAGE = require('../assets/traysikel.png');
 
 function TabIcon({ emoji, focused }) {
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 2 }}>
       <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.45 }}>{emoji}</Text>
+    </View>
+  );
+}
+
+function TrikeTabIcon({ focused }) {
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 2, opacity: focused ? 1 : 0.45 }}>
+      <View style={{
+        width: 28, height: 28, borderRadius: 14,
+        backgroundColor: C.accent,
+        alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+      }}>
+        <Image source={TRAYSIKEL_IMAGE} style={{ width: 24, height: 20 }} resizeMode="contain" />
+      </View>
     </View>
   );
 }
@@ -69,7 +84,7 @@ export default function AppNavigator() {
           name="Map"
           component={PassengerMapScreen}
           options={{
-            title: 'ParaPo 🛺',
+            title: 'ParaPo',
             headerShown: false,
             tabBarLabel: 'Mapa',
             tabBarIcon: ({ focused }) => <TabIcon emoji="🗺️" focused={focused} />,
@@ -85,7 +100,7 @@ export default function AppNavigator() {
           options={{
             title: 'Dashboard',
             tabBarLabel: 'Dashboard',
-            tabBarIcon: ({ focused }) => <TabIcon emoji="🛺" focused={focused} />,
+            tabBarIcon: ({ focused }) => <TrikeTabIcon focused={focused} />,
           }}
         />
       )}

@@ -11,8 +11,10 @@ import { useDriverStore } from '../store/driverStore';
 import { useRideStore } from '../store/rideStore';
 import { C } from '../theme/colors';
 
+const TRAYSIKEL_IMAGE = require('../../assets/traysikel.png');
+
 const DRIVER_CANNED = [
-  "On my way! 🛺",
+  "On my way!",
   "I'm here now! 📍",
   "Running 5 mins late ⏳",
   "Look for my plate 🔍",
@@ -94,7 +96,7 @@ export default function DriverScreen() {
           Vibration.vibrate([0, 400, 200, 400, 200, 400]);
           Notifications.scheduleNotificationAsync({
             content: {
-              title: '🛺 Bagong Pasahero!',
+              title: 'Bagong Pasahero!',
               body:  'May naghahanap ng sakay. Tanggapin agad!',
               sound: true,
             },
@@ -347,7 +349,9 @@ export default function DriverScreen() {
               <Text style={s.statLbl}>GPS sharing</Text>
             </View>
             <View style={s.statCard}>
-              <Text style={s.statIcon}>🛺</Text>
+              <View style={s.statTrikeWrap}>
+                <Image source={TRAYSIKEL_IMAGE} style={s.statTrikeImg} resizeMode="contain" />
+              </View>
               <Text style={s.statVal}>Ready</Text>
               <Text style={s.statLbl}>For rides</Text>
             </View>
@@ -357,7 +361,9 @@ export default function DriverScreen() {
         {/* ── IDLE STATE ── */}
         {driverState === DS.IDLE && (
           <View style={s.waitCard}>
-            <Text style={s.waitEmoji}>🛺</Text>
+            <View style={s.waitTrikeWrap}>
+              <Image source={TRAYSIKEL_IMAGE} style={s.waitTrikeImg} resizeMode="contain" />
+            </View>
             <Text style={s.waitTitle}>Naghihintay ng pasahero…</Text>
             <Text style={s.waitSub}>You are visible to passengers nearby.{'\n'}Stay in range!</Text>
           </View>
@@ -447,7 +453,12 @@ export default function DriverScreen() {
       <Animated.View style={[s.slideCard, { transform: [{ translateY: reqCardAnim }] }]}>
         <View style={s.slideHandle} />
 
-        <Text style={s.reqBadge}>🛺  NEW PASSENGER REQUEST</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <View style={s.reqBadgeTrikeWrap}>
+            <Image source={TRAYSIKEL_IMAGE} style={s.reqBadgeTrikeImg} resizeMode="contain" />
+          </View>
+          <Text style={s.reqBadge}>NEW PASSENGER REQUEST</Text>
+        </View>
 
         {/* Avatar + Identity */}
         <View style={s.reqIdentity}>
@@ -719,7 +730,14 @@ const s = StyleSheet.create({
     padding: 14, alignItems: 'center',
     borderWidth: 1, borderColor: C.border,
   },
-  statIcon: { fontSize: 20, marginBottom: 6 },
+  statIcon:     { fontSize: 20, marginBottom: 6 },
+  statTrikeWrap: {
+    width: 38, height: 30, borderRadius: 8,
+    backgroundColor: C.accent,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+    marginBottom: 6,
+  },
+  statTrikeImg: { width: 34, height: 27 },
   statVal:  { fontSize: 15, fontWeight: '700', color: C.text },
   statLbl:  { fontSize: 10, color: C.muted, marginTop: 2 },
 
@@ -729,7 +747,15 @@ const s = StyleSheet.create({
     padding: 32, alignItems: 'center',
     borderWidth: 1, borderColor: C.border,
   },
-  waitEmoji: { fontSize: 56, marginBottom: 14 },
+  waitEmoji:    { fontSize: 56, marginBottom: 14 },
+  waitTrikeWrap: {
+    width: 100, height: 80, borderRadius: 20,
+    backgroundColor: C.accentDim,
+    borderWidth: 1.5, borderColor: C.accent + '55',
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+    marginBottom: 14,
+  },
+  waitTrikeImg: { width: 90, height: 72 },
   waitTitle: { fontSize: 18, fontWeight: '800', color: C.text, textAlign: 'center' },
   waitSub:   { fontSize: 13, color: C.muted, textAlign: 'center', marginTop: 8, lineHeight: 20 },
   goOnlineBtn: {
@@ -770,8 +796,13 @@ const s = StyleSheet.create({
   reqBadge: {
     fontSize: 11, fontWeight: '800', color: C.accent,
     textTransform: 'uppercase', letterSpacing: 1,
-    marginBottom: 16,
   },
+  reqBadgeTrikeWrap: {
+    width: 28, height: 22, borderRadius: 6,
+    backgroundColor: C.accent,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+  },
+  reqBadgeTrikeImg: { width: 26, height: 20 },
   reqIdentity:  { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   reqAvatarRing: {
     width: 80, height: 80, borderRadius: 40,

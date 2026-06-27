@@ -10,7 +10,7 @@ import { C } from '../theme/colors';
 
 const ROLES = [
   { label: '🤚 Pasahero', value: 'passenger', desc: 'I need a ride' },
-  { label: '🛺 Drayber',  value: 'driver',    desc: 'I offer rides' },
+  { label: 'Drayber',  value: 'driver',    desc: 'I offer rides' },
 ];
 
 // ── Reusable field ────────────────────────────────────────────

@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, Image, FlatList, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+
+const TRAYSIKEL_IMAGE = require('../../assets/traysikel.png');
 import * as Location from 'expo-location';
 import { useAuthStore } from '../store/authStore';
 import { useRideStore } from '../store/rideStore';
@@ -123,7 +125,9 @@ export default function HistoryScreen() {
       <Text style={s.title}>Kasaysayan ng Biyahe</Text>
       {rideHistory.length === 0 ? (
         <View style={s.empty}>
-          <Text style={s.emptyIcon}>🛺</Text>
+          <View style={s.emptyTrikeWrap}>
+            <Image source={TRAYSIKEL_IMAGE} style={s.emptyTrikeImg} resizeMode="contain" />
+          </View>
           <Text style={s.emptyTitle}>Wala pang biyahe</Text>
           <Text style={s.emptyText}>Your ride history will appear here</Text>
         </View>
@@ -175,7 +179,15 @@ const s = StyleSheet.create({
   ratingVal:   { fontSize: 12, color: C.muted },
 
   empty:      { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyIcon:  { fontSize: 52, marginBottom: 12 },
+  emptyIcon:     { fontSize: 52, marginBottom: 12 },
+  emptyTrikeWrap: {
+    width: 110, height: 88, borderRadius: 22,
+    backgroundColor: C.accentDim,
+    borderWidth: 1.5, borderColor: C.accent + '55',
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+    marginBottom: 12,
+  },
+  emptyTrikeImg: { width: 98, height: 78 },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: C.text },
   emptyText:  { fontSize: 13, color: C.muted, marginTop: 6 },
 });

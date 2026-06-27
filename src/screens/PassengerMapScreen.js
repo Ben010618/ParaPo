@@ -22,7 +22,9 @@ const PAX_CANNED = [
   "Where are you? 🛺",
 ];
 
-const TRIKE_ICON = require('../../assets/iconinthemap.png');
+const TRIKE_ICON       = require('../../assets/iconinthemap.png');
+const TRAYSIKEL_IMAGE  = require('../../assets/traysikel.png');
+const PARA_PO_BTN      = require('../../assets/ParaPoButton.png');
 
 // ── Driver map marker ─────────────────────────────────────────
 function DriverMarker({ pulse = false }) {
@@ -637,13 +639,20 @@ export default function PassengerMapScreen() {
       <View style={s.topRow}>
         <View style={[s.pill, drivers.length === 0 && s.pillEmpty]}>
           <View style={[s.pillDot, drivers.length === 0 && { backgroundColor: C.red }]} />
-          <Text style={s.pillText}>
-            {rideState === RS.MATCHED
-              ? '🛺 Driver on the way'
-              : drivers.length > 0
+          {rideState === RS.MATCHED ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={s.pillTrikeWrap}>
+                <Image source={TRAYSIKEL_IMAGE} style={s.pillTrikeImg} resizeMode="contain" />
+              </View>
+              <Text style={s.pillText}>Driver on the way</Text>
+            </View>
+          ) : (
+            <Text style={s.pillText}>
+              {drivers.length > 0
                 ? `${drivers.length} trike${drivers.length !== 1 ? 's' : ''} nearby`
                 : locationError ?? 'No drivers available'}
-          </Text>
+            </Text>
+          )}
         </View>
       </View>
 
@@ -669,7 +678,12 @@ export default function PassengerMapScreen() {
 
           <View style={s.infoRow}>
             <View style={s.infoBadge}>
-              <Text style={s.infoBadgeText}>🛺 {drivers.length} available</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <View style={s.pillTrikeWrap}>
+                  <Image source={TRAYSIKEL_IMAGE} style={s.pillTrikeImg} resizeMode="contain" />
+                </View>
+                <Text style={s.infoBadgeText}>{drivers.length} available</Text>
+              </View>
             </View>
             <View style={s.infoBadge}>
               <Text style={s.infoBadgeText}>
@@ -717,34 +731,25 @@ export default function PassengerMapScreen() {
             </View>
           )}
 
-          <TouchableOpacity
-            style={[
-              s.paraBtn,
-              rideState === RS.MATCHED   && s.paraBtnMatched,
-              rideState === RS.SEARCHING && s.paraBtnSearching,
-            ]}
-            onPress={handleParaPo}
-            activeOpacity={0.82}
-            disabled={rideState === RS.SEARCHING || rideState === RS.MATCHED}
-          >
-            {rideState === RS.SEARCHING ? (
-              <>
-                <ActivityIndicator color={C.accent} size="small" />
-                <Text style={[s.paraBtnText, { color: C.muted }]}>Finding your driver…</Text>
-              </>
-            ) : rideState === RS.MATCHED ? (
-              <>
-                <Text style={[s.paraBtnEmoji, { fontSize: 20 }]}>✓</Text>
-                <Text style={[s.paraBtnText, { color: '#fff' }]}>Driver is on the way!</Text>
-              </>
-            ) : (
-              <>
-                <Text style={s.paraBtnEmoji}>🛺</Text>
-                <Text style={s.paraBtnText}>Para Po!</Text>
-                <Text style={s.paraBtnArrow}>›</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          {rideState === RS.SEARCHING ? (
+            <View style={[s.paraBtn, s.paraBtnSearching]}>
+              <ActivityIndicator color={C.accent} size="small" />
+              <Text style={[s.paraBtnText, { color: C.muted }]}>Finding your driver…</Text>
+            </View>
+          ) : rideState === RS.MATCHED ? (
+            <View style={[s.paraBtn, s.paraBtnMatched]}>
+              <View style={s.paraBtnTrikeCircle}>
+                <Image source={TRAYSIKEL_IMAGE} style={s.paraBtnTrikeImg} resizeMode="contain" />
+              </View>
+              <Text style={[s.paraBtnText, { color: '#fff' }]}>Driver is on the way!</Text>
+            </View>
+          ) : (
+            <View style={s.paraBtnGlow}>
+              <TouchableOpacity onPress={handleParaPo} activeOpacity={0.82}>
+                <Image source={PARA_PO_BTN} style={s.paraBtnImg} resizeMode="contain" />
+              </TouchableOpacity>
+            </View>
+          )}
 
           {rideState === RS.IDLE && (
             <Text style={s.hintText}>
@@ -764,7 +769,12 @@ export default function PassengerMapScreen() {
           {rideState === RS.MATCHED && (
             <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
               <View style={s.cardHandle} />
-              <Text style={s.matchBadge}>🛺  DRIVER ON THE WAY</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                <View style={s.badgeTrikeWrap}>
+                  <Image source={TRAYSIKEL_IMAGE} style={s.badgeTrikeImg} resizeMode="contain" />
+                </View>
+                <Text style={s.matchBadge}>DRIVER ON THE WAY</Text>
+              </View>
 
               {/* Prominent driver ID card — name, plate, ETA at a glance */}
               <View style={s.driverIdCard}>
@@ -800,7 +810,7 @@ export default function PassengerMapScreen() {
                     />
                   ) : (
                     <View style={s.matchAvatar}>
-                      <Image source={TRIKE_ICON} style={{ width: 44, height: 44 }} resizeMode="contain" />
+                      <Image source={TRAYSIKEL_IMAGE} style={s.matchAvatarTrikeImg} resizeMode="contain" />
                     </View>
                   )}
                 </View>
@@ -995,7 +1005,9 @@ export default function PassengerMapScreen() {
           {rideState === RS.ARRIVED && (
             <View style={s.arrivedWrap}>
               <View style={s.cardHandle} />
-              <Text style={{ fontSize: 52, textAlign: 'center' }}>🛺</Text>
+              <View style={s.arrivedTrikeWrap}>
+                <Image source={TRAYSIKEL_IMAGE} style={s.arrivedTrikeImg} resizeMode="contain" />
+              </View>
               <Text style={s.arrivedTitle}>Nakarating na!</Text>
 
               {/* Trip summary */}
@@ -1179,35 +1191,63 @@ const s = StyleSheet.create({
   destActiveLabel: { fontSize: 10, color: C.blue, fontWeight: '700', letterSpacing: 0.8 },
   destActiveText:  { fontSize: 14, color: C.text, fontWeight: '600', marginTop: 2 },
 
-  paraBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 62,
-    borderRadius: 18,
-    backgroundColor: C.accent,
+  // ── Para Po button ────────────────────────────────────────
+  paraBtnGlow: {
     marginVertical: 12,
-    gap: 10,
+    borderRadius: 50,
     shadowColor: C.accent,
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.4,
-    shadowRadius: 14,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.65,
+    shadowRadius: 24,
+    elevation: 20,
+  },
+  paraBtnImg: { width: '100%', height: 74 },
+  paraBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    height: 62, borderRadius: 18, marginVertical: 12, gap: 10,
   },
   paraBtnSearching: {
     backgroundColor: C.surface2,
     borderWidth: 1, borderColor: C.border,
-    shadowOpacity: 0, elevation: 2,
   },
   paraBtnMatched: {
     backgroundColor: C.green,
     shadowColor: C.green,
-    shadowOpacity: 0.35,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35, shadowRadius: 12, elevation: 10,
   },
-  paraBtnEmoji: { fontSize: 22 },
-  paraBtnText:  { fontSize: 17, fontWeight: '800', color: '#000', letterSpacing: 0.2 },
-  paraBtnArrow: { position: 'absolute', right: 22, fontSize: 22, fontWeight: '900', color: 'rgba(0,0,0,0.3)' },
-  hintText:     { textAlign: 'center', color: C.muted2, fontSize: 12, marginTop: 2 },
+  paraBtnTrikeCircle: {
+    width: 36, height: 36, borderRadius: 18,
+    backgroundColor: C.accent,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+  },
+  paraBtnTrikeImg: { width: 32, height: 26 },
+  paraBtnText: { fontSize: 17, fontWeight: '800', color: '#000', letterSpacing: 0.2 },
+  // ── Pill trike icon ───────────────────────────────────────
+  pillTrikeWrap: {
+    width: 22, height: 18, borderRadius: 4,
+    backgroundColor: C.accent,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+  },
+  pillTrikeImg: { width: 20, height: 16 },
+  // ── Match badge trike icon ────────────────────────────────
+  badgeTrikeWrap: {
+    width: 26, height: 20, borderRadius: 5,
+    backgroundColor: C.accent,
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+  },
+  badgeTrikeImg: { width: 24, height: 19 },
+  // ── Arrived screen trike ──────────────────────────────────
+  arrivedTrikeWrap: {
+    width: 130, height: 104,
+    backgroundColor: C.accentDim,
+    borderRadius: 26, borderWidth: 1.5, borderColor: C.accent + '66',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 8,
+  },
+  arrivedTrikeImg: { width: 116, height: 92 },
+  // ── Match avatar trike fallback ───────────────────────────
+  matchAvatarTrikeImg: { width: 52, height: 42 },
+  hintText: { textAlign: 'center', color: C.muted2, fontSize: 12, marginTop: 2 },
 
   // ── Driver matched card ───────────────────────────────────
   driverCard: {
@@ -1219,7 +1259,7 @@ const s = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 1, shadowRadius: 30, elevation: 30,
   },
   cardHandle:  { width: 44, height: 4, backgroundColor: C.border, borderRadius: 2, alignSelf: 'center', marginVertical: 16 },
-  matchBadge:  { fontSize: 11, fontWeight: '800', color: C.green, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 14 },
+  matchBadge:  { fontSize: 11, fontWeight: '800', color: C.green, textTransform: 'uppercase', letterSpacing: 1 },
   matchHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
   matchAvatarRing: { width: 80, height: 80, borderRadius: 40, borderWidth: 2.5, borderColor: C.accent, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   matchAvatarImg:  { width: 80, height: 80, borderRadius: 40 },
