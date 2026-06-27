@@ -29,37 +29,27 @@ const TRAYSIKEL_IMAGE = require('../../assets/traysikel.png');
 function DriverMarker({ pulse = false }) {
   return (
     <View style={mk.wrap}>
-      {/* Outer glow ring */}
-      <View style={[mk.glowOuter, pulse && mk.glowOuterPulse]} />
-      {/* Inner glow halo */}
-      <View style={[mk.glowInner, pulse && mk.glowInnerPulse]} />
-      {/* Icon */}
-      <Image source={TRIKE_ICON} style={mk.icon} resizeMode="contain" />
+      <View style={[mk.ring, pulse && mk.ringPulse]}>
+        <Image source={TRIKE_ICON} style={mk.icon} resizeMode="contain" />
+      </View>
     </View>
   );
 }
 const mk = StyleSheet.create({
-  wrap: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
-  glowOuter: {
-    position: 'absolute', width: 64, height: 64, borderRadius: 32,
-    backgroundColor: 'rgba(255,193,7,0.08)',
-    borderWidth: 1, borderColor: 'rgba(255,193,7,0.2)',
-  },
-  glowOuterPulse: {
+  wrap:     { padding: 6 },
+  ring: {
+    width: 58, height: 58, borderRadius: 29,
     backgroundColor: 'rgba(255,193,7,0.18)',
-    borderColor: 'rgba(255,193,7,0.55)',
+    borderWidth: 2.5, borderColor: '#FFC107',
+    alignItems: 'center', justifyContent: 'center',
   },
-  glowInner: {
-    position: 'absolute', width: 44, height: 44, borderRadius: 22,
-    backgroundColor: 'rgba(255,193,7,0.15)',
+  ringPulse: {
+    backgroundColor: 'rgba(255,193,7,0.38)',
+    borderColor: '#FFD54F',
+    shadowColor: '#FFC107', shadowOpacity: 0.9, shadowRadius: 14,
+    elevation: 12,
   },
-  glowInnerPulse: {
-    backgroundColor: 'rgba(255,193,7,0.32)',
-  },
-  icon: {
-    width: 36, height: 36,
-    shadowColor: C.accent, shadowOpacity: 0.9, shadowRadius: 10, elevation: 8,
-  },
+  icon: { width: 40, height: 40 },
 });
 
 // ── Destination popout modal ──────────────────────────────────
@@ -743,22 +733,18 @@ export default function PassengerMapScreen() {
               <Text style={[s.paraBtnText, { color: '#fff' }]}>Driver is on the way!</Text>
             </View>
           ) : (
-            <TouchableOpacity onPress={handleParaPo} activeOpacity={0.88} style={s.paraBtnWrapper}>
-              {/* 3D depth layer — dark gold peeking below the face */}
-              <View style={s.paraBtnDepth} />
-              {/* Main face */}
-              <View style={s.paraBtnFace}>
-                {/* Dome shine */}
-                <View style={s.paraBtnShine} pointerEvents="none" />
-                <View style={s.paraBtnRow}>
-                  <View style={s.paraBtnIconCircle}>
-                    <Image source={TRAYSIKEL_IMAGE} style={s.paraBtnIconImg} resizeMode="contain" />
-                  </View>
+            <TouchableOpacity onPress={handleParaPo} activeOpacity={0.82} style={s.paraBtnWrapper}>
+              <View style={s.paraBtnOuter}>
+                {/* cream highlight strip — top */}
+                <View style={s.paraBtnHighlight} />
+                {/* main yellow face */}
+                <View style={s.paraBtnFace}>
+                  <Image source={TRAYSIKEL_IMAGE} style={s.paraBtnIconImg} resizeMode="contain" />
                   <Text style={s.paraBtnLabel}>Para Po!</Text>
-                  <View style={s.paraBtnArrowBadge}>
-                    <Text style={s.paraBtnArrowText}>›</Text>
-                  </View>
+                  <Text style={s.paraBtnArrowText}>›</Text>
                 </View>
+                {/* orange depth band — bottom */}
+                <View style={s.paraBtnDepth} />
               </View>
             </TouchableOpacity>
           )}
@@ -879,40 +865,55 @@ export default function PassengerMapScreen() {
                 </View>
               </View>
 
-              {/* ── CHAT THREAD ── */}
-              <View style={s.chatBox}>
+              {/* ── CHAT THREAD (WhatsApp-style) ── */}
+              <View style={s.chatWrap}>
+                <View style={s.chatHdr}>
+                  <Text style={s.chatHdrTitle}>💬  Chat with Driver</Text>
+                </View>
                 <ScrollView
                   ref={msgScrollRef}
                   nestedScrollEnabled
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={s.chatContent}
+                  style={s.chatScroll}
                   onContentSizeChange={() => msgScrollRef.current?.scrollToEnd({ animated: true })}
                 >
                   {rideMessages.length === 0 ? (
-                    <Text style={s.chatEmpty}>
-                      No messages yet.{'\n'}Propose a fare or type a message below.
-                    </Text>
+                    <Text style={s.chatEmpty}>No messages yet.{'\n'}Send a message or propose a fare below.</Text>
                   ) : (
                     rideMessages.map((msg) => {
-                      const isMe      = msg.sender_role === 'passenger';
-                      const isFare    = msg.message.startsWith('💰') || msg.message.startsWith('✅ Fare agreed');
-                      const fareAmt   = msg.message.match(/₱(\d+)/)?.[1];
+                      const isMe       = msg.sender_role === 'passenger';
+                      const isFare     = msg.message.startsWith('💰') || msg.message.startsWith('✅ Fare agreed');
+                      const fareAmt    = msg.message.match(/₱(\d+)/)?.[1];
                       const agreedFare = activeRide?.agreed_fare;
-                      const showAgree = isFare && !isMe && fareAmt && !agreedFare;
+                      const showAgree  = isFare && !isMe && fareAmt && !agreedFare;
+                      const time       = msg.created_at
+                        ? new Date(msg.created_at).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })
+                        : null;
                       return (
-                        <View key={msg.id ?? msg.created_at}
-                          style={[s.msgBubble, isMe ? s.msgBubbleMe : s.msgBubbleThem, isFare && s.msgBubbleFare]}>
-                          <Text style={[s.msgText, isMe ? s.msgTextMe : s.msgTextThem]}>
-                            {msg.message}
-                          </Text>
-                          {showAgree && (
-                            <TouchableOpacity style={s.agreeBtn} onPress={() => handleAgreeFare(fareAmt)} activeOpacity={0.8}>
-                              <Text style={s.agreeBtnText}>✓ Agree to ₱{fareAmt}</Text>
-                            </TouchableOpacity>
+                        <View key={msg.id ?? msg.created_at} style={[s.msgRow, isMe ? s.msgRowMe : s.msgRowThem]}>
+                          {!isMe && (
+                            <View style={s.msgAvatar}>
+                              {driverProfile?.license_photo_url
+                                ? <Image source={{ uri: driverProfile.license_photo_url }} style={s.msgAvatarImg} />
+                                : <View style={s.msgAvatarFb}><Image source={TRAYSIKEL_IMAGE} style={s.msgAvatarTrike} resizeMode="contain" /></View>
+                              }
+                            </View>
                           )}
-                          {agreedFare && fareAmt && parseInt(fareAmt) === agreedFare && !isMe && (
-                            <Text style={s.agreedLabel}>✅ You agreed</Text>
-                          )}
+                          <View style={[s.msgBubbleWrap, isMe && { alignItems: 'flex-end' }]}>
+                            <View style={[s.msgBubble, isMe ? s.msgBubbleMe : s.msgBubbleThem, isFare && s.msgBubbleFare]}>
+                              <Text style={[s.msgText, isMe ? s.msgTextMe : s.msgTextThem]}>{msg.message}</Text>
+                              {showAgree && (
+                                <TouchableOpacity style={s.agreeBtn} onPress={() => handleAgreeFare(fareAmt)} activeOpacity={0.8}>
+                                  <Text style={s.agreeBtnText}>✓ Agree to ₱{fareAmt}</Text>
+                                </TouchableOpacity>
+                              )}
+                              {agreedFare && fareAmt && parseInt(fareAmt) === agreedFare && !isMe && (
+                                <Text style={s.agreedLabel}>✅ You agreed</Text>
+                              )}
+                            </View>
+                            {time && <Text style={[s.msgTime, isMe ? s.msgTimeMe : s.msgTimeThem]}>{time}</Text>}
+                          </View>
                         </View>
                       );
                     })
@@ -929,7 +930,7 @@ export default function PassengerMapScreen() {
                 ))}
               </ScrollView>
 
-              {/* Fare bargaining / free-text input */}
+              {/* Input bar */}
               {showFareInput ? (
                 <View style={s.fareInputRow}>
                   <Text style={s.fareRowLabel}>💰 Propose</Text>
@@ -966,7 +967,7 @@ export default function PassengerMapScreen() {
                   </TouchableOpacity>
                   <TextInput
                     style={s.chatInput}
-                    placeholder="Type a message…"
+                    placeholder="Message driver…"
                     placeholderTextColor={C.muted}
                     value={freeText}
                     onChangeText={setFreeText}
@@ -979,7 +980,7 @@ export default function PassengerMapScreen() {
                     disabled={!freeText.trim()}
                     activeOpacity={0.8}
                   >
-                    <Text style={s.sendBtnText}>↑</Text>
+                    <Text style={s.sendBtnText}>›</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -1203,63 +1204,39 @@ const s = StyleSheet.create({
   destActiveLabel: { fontSize: 10, color: C.blue, fontWeight: '700', letterSpacing: 0.8 },
   destActiveText:  { fontSize: 14, color: C.text, fontWeight: '600', marginTop: 2 },
 
-  // ── Para Po button — 3D custom ────────────────────────────
+  // ── Para Po button — pixel-art 3D ────────────────────────
   paraBtnWrapper: {
     marginVertical: 14,
-    shadowColor: C.accent,
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.6,
-    shadowRadius: 22,
-    elevation: 20,
   },
-  paraBtnDepth: {
-    position: 'absolute',
-    bottom: -8, left: 6, right: 6,
-    height: '100%',
-    borderRadius: 22,
-    backgroundColor: '#8B5E00',
+  paraBtnOuter: {
+    borderWidth: 5,
+    borderColor: '#12122A',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  paraBtnHighlight: {
+    height: 14,
+    backgroundColor: '#FFFACD',
   },
   paraBtnFace: {
-    borderRadius: 22,
-    backgroundColor: C.accent,
-    overflow: 'hidden',
-    borderTopWidth: 2,
-    borderTopColor: 'rgba(255,255,255,0.55)',
-    borderLeftWidth: 1.5,
-    borderLeftColor: 'rgba(255,255,255,0.28)',
-    borderRightWidth: 1.5,
-    borderRightColor: 'rgba(0,0,0,0.1)',
-    borderBottomWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFC107',
+    paddingVertical: 16,
+    paddingHorizontal: 22,
+    gap: 16,
   },
-  paraBtnShine: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 38,
-    borderTopLeftRadius: 22, borderTopRightRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.22)',
+  paraBtnDepth: {
+    height: 20,
+    backgroundColor: '#FF8C00',
   },
-  paraBtnRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 18, paddingHorizontal: 22, gap: 14,
-  },
-  paraBtnIconCircle: {
-    width: 54, height: 54, borderRadius: 27,
-    backgroundColor: 'rgba(0,0,0,0.15)',
-    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-    borderWidth: 1.5, borderColor: 'rgba(0,0,0,0.22)',
-  },
-  paraBtnIconImg: { width: 46, height: 37 },
+  paraBtnIconImg: { width: 56, height: 45 },
   paraBtnLabel: {
     flex: 1, textAlign: 'center',
-    fontSize: 28, fontWeight: '900', color: '#1A1A1A', letterSpacing: 0.5,
-    textShadowColor: 'rgba(255,255,255,0.45)',
-    textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2,
+    fontSize: 30, fontWeight: '900', color: '#12122A', letterSpacing: 0.5,
   },
-  paraBtnArrowBadge: {
-    width: 42, height: 42, borderRadius: 21,
-    backgroundColor: 'rgba(0,0,0,0.15)',
-    alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: 'rgba(0,0,0,0.2)',
-  },
-  paraBtnArrowText: { fontSize: 28, fontWeight: '900', color: '#1A1A1A', marginTop: -2 },
+  paraBtnArrowText: { fontSize: 30, fontWeight: '900', color: '#12122A' },
   // ── Searching / matched pill states ──────────────────────
   paraBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
@@ -1390,43 +1367,63 @@ const s = StyleSheet.create({
   driverIdETAVal:   { fontSize: 20, fontWeight: '900', color: C.green },
   driverIdETALabel: { fontSize: 9, color: C.green, fontWeight: '700' },
 
-  // ── Chat thread ───────────────────────────────────────────
-  chatBox: {
-    maxHeight: 160,
-    backgroundColor: C.surface2, borderRadius: 14,
-    borderWidth: 1, borderColor: C.border,
-    marginBottom: 10, overflow: 'hidden',
+  // ── Chat (WhatsApp-style) ─────────────────────────────────
+  chatWrap: {
+    borderRadius: 16, overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(255,193,7,0.2)',
+    backgroundColor: '#0E1520', marginBottom: 8,
   },
-  chatContent: { padding: 10, gap: 6 },
-  chatEmpty:   { fontSize: 12, color: C.muted, textAlign: 'center', paddingVertical: 18, fontStyle: 'italic' },
-  msgBubble:   { maxWidth: '80%', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 },
-  msgBubbleMe:   { alignSelf: 'flex-end',   backgroundColor: C.accent },
-  msgBubbleThem: { alignSelf: 'flex-start', backgroundColor: C.surface3 },
-  msgText:    { fontSize: 14 },
-  msgTextMe:   { color: '#000', fontWeight: '600' },
-  msgTextThem: { color: C.text },
+  chatHdr: {
+    paddingHorizontal: 14, paddingVertical: 9,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,193,7,0.08)',
+  },
+  chatHdrTitle: { fontSize: 12, fontWeight: '700', color: C.accent, letterSpacing: 0.6 },
+  chatScroll:   { maxHeight: 220 },
+  chatContent:  { padding: 12, gap: 6 },
+  chatEmpty:    { fontSize: 12, color: C.muted, textAlign: 'center', paddingVertical: 22, fontStyle: 'italic' },
 
-  // ── Chat input ────────────────────────────────────────────
+  msgRow:     { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
+  msgRowMe:   { justifyContent: 'flex-end' },
+  msgRowThem: { justifyContent: 'flex-start' },
+
+  msgAvatar:      { width: 28, height: 28, borderRadius: 14, overflow: 'hidden', marginBottom: 16 },
+  msgAvatarImg:   { width: 28, height: 28, borderRadius: 14 },
+  msgAvatarFb:    { width: 28, height: 28, borderRadius: 14, backgroundColor: C.accentDim, alignItems: 'center', justifyContent: 'center' },
+  msgAvatarTrike: { width: 22, height: 18 },
+
+  msgBubbleWrap: { maxWidth: '78%', alignItems: 'flex-start' },
+  msgBubble:     { borderRadius: 18, paddingHorizontal: 13, paddingVertical: 9 },
+  msgBubbleMe:   { backgroundColor: '#FFC107', borderBottomRightRadius: 4 },
+  msgBubbleThem: { backgroundColor: '#1A2535', borderBottomLeftRadius: 4 },
+  msgBubbleFare: { borderWidth: 1, borderColor: 'rgba(255,193,7,0.55)' },
+  msgText:       { fontSize: 14 },
+  msgTextMe:     { color: '#1A1A1A', fontWeight: '500' },
+  msgTextThem:   { color: '#E8E8E8' },
+  msgTime:       { fontSize: 10, marginTop: 3 },
+  msgTimeMe:     { color: 'rgba(0,0,0,0.35)', alignSelf: 'flex-end' },
+  msgTimeThem:   { color: 'rgba(255,255,255,0.28)' },
+
   chatInputRow: {
     flexDirection: 'row', alignItems: 'center',
-    backgroundColor: C.surface2, borderRadius: 14,
-    borderWidth: 1, borderColor: C.border,
-    paddingHorizontal: 10, height: 48, gap: 6, marginBottom: 8,
+    backgroundColor: '#1A2130',
+    borderRadius: 26, borderWidth: 1, borderColor: 'rgba(255,193,7,0.22)',
+    paddingHorizontal: 6, paddingVertical: 4,
+    gap: 6, marginBottom: 8,
   },
-  chatInput:      { flex: 1, fontSize: 14, color: C.text },
+  chatInput:      { flex: 1, fontSize: 14, color: C.text, paddingHorizontal: 8, paddingVertical: 6 },
   fareToggleBtn:  {
-    width: 34, height: 34, borderRadius: 8,
+    width: 36, height: 36, borderRadius: 18,
     backgroundColor: C.accentDim, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: C.accent + '44',
   },
   fareToggleText: { fontSize: 18 },
-  sendBtn:        {
+  sendBtn: {
     width: 36, height: 36, borderRadius: 18,
     backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
   },
-  sendBtnText:    { fontSize: 18, fontWeight: '900', color: '#000' },
+  sendBtnText: { fontSize: 22, fontWeight: '900', color: '#1A1A1A', lineHeight: 24 },
 
-  // ── Fare proposal input ───────────────────────────────────
   fareInputRow: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: C.accentDim, borderRadius: 14,
@@ -1435,7 +1432,7 @@ const s = StyleSheet.create({
   },
   fareRowLabel:  { fontSize: 13, color: C.accent, fontWeight: '700' },
   fareInput:     { flex: 1, fontSize: 18, color: C.text, fontWeight: '700' },
-  fareSendBtn:   {
+  fareSendBtn: {
     backgroundColor: C.accent, borderRadius: 10,
     paddingHorizontal: 14, paddingVertical: 7,
   },
