@@ -19,12 +19,11 @@ const PAX_CANNED = [
   "On my way 🏃",
   "I'm here! 📍",
   "Wait lang 5 mins ⏳",
-  "Where are you? 🛺",
+  "Where are you?",
 ];
 
-const TRIKE_ICON       = require('../../assets/iconinthemap.png');
-const TRAYSIKEL_IMAGE  = require('../../assets/traysikel.png');
-const PARA_PO_BTN      = require('../../assets/ParaPoButton.png');
+const TRIKE_ICON      = require('../../assets/iconinthemap.png');
+const TRAYSIKEL_IMAGE = require('../../assets/traysikel.png');
 
 // ── Driver map marker ─────────────────────────────────────────
 function DriverMarker({ pulse = false }) {
@@ -309,7 +308,7 @@ export default function PassengerMapScreen() {
           const plate = dp?.plate_number ? ` · Plate: ${dp.plate_number}` : '';
           Notifications.scheduleNotificationAsync({
             content: {
-              title: '🛺 Driver accepted your ride!',
+              title: 'Driver accepted your ride!',
               body:  `${dName}${plate} is on the way. Look for their tricycle.`,
               sound: true,
             },
@@ -744,11 +743,24 @@ export default function PassengerMapScreen() {
               <Text style={[s.paraBtnText, { color: '#fff' }]}>Driver is on the way!</Text>
             </View>
           ) : (
-            <View style={s.paraBtnGlow}>
-              <TouchableOpacity onPress={handleParaPo} activeOpacity={0.82}>
-                <Image source={PARA_PO_BTN} style={s.paraBtnImg} resizeMode="contain" />
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity onPress={handleParaPo} activeOpacity={0.88} style={s.paraBtnWrapper}>
+              {/* 3D depth layer — dark gold peeking below the face */}
+              <View style={s.paraBtnDepth} />
+              {/* Main face */}
+              <View style={s.paraBtnFace}>
+                {/* Dome shine */}
+                <View style={s.paraBtnShine} pointerEvents="none" />
+                <View style={s.paraBtnRow}>
+                  <View style={s.paraBtnIconCircle}>
+                    <Image source={TRAYSIKEL_IMAGE} style={s.paraBtnIconImg} resizeMode="contain" />
+                  </View>
+                  <Text style={s.paraBtnLabel}>Para Po!</Text>
+                  <View style={s.paraBtnArrowBadge}>
+                    <Text style={s.paraBtnArrowText}>›</Text>
+                  </View>
+                </View>
+              </View>
+            </TouchableOpacity>
           )}
 
           {rideState === RS.IDLE && (
@@ -1191,24 +1203,70 @@ const s = StyleSheet.create({
   destActiveLabel: { fontSize: 10, color: C.blue, fontWeight: '700', letterSpacing: 0.8 },
   destActiveText:  { fontSize: 14, color: C.text, fontWeight: '600', marginTop: 2 },
 
-  // ── Para Po button ────────────────────────────────────────
-  paraBtnGlow: {
-    marginVertical: 12,
-    borderRadius: 50,
+  // ── Para Po button — 3D custom ────────────────────────────
+  paraBtnWrapper: {
+    marginVertical: 14,
     shadowColor: C.accent,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.65,
-    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.6,
+    shadowRadius: 22,
     elevation: 20,
   },
-  paraBtnImg: { width: '100%', height: 74 },
+  paraBtnDepth: {
+    position: 'absolute',
+    bottom: -8, left: 6, right: 6,
+    height: '100%',
+    borderRadius: 22,
+    backgroundColor: '#8B5E00',
+  },
+  paraBtnFace: {
+    borderRadius: 22,
+    backgroundColor: C.accent,
+    overflow: 'hidden',
+    borderTopWidth: 2,
+    borderTopColor: 'rgba(255,255,255,0.55)',
+    borderLeftWidth: 1.5,
+    borderLeftColor: 'rgba(255,255,255,0.28)',
+    borderRightWidth: 1.5,
+    borderRightColor: 'rgba(0,0,0,0.1)',
+    borderBottomWidth: 0,
+  },
+  paraBtnShine: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: 38,
+    borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  paraBtnRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 18, paddingHorizontal: 22, gap: 14,
+  },
+  paraBtnIconCircle: {
+    width: 54, height: 54, borderRadius: 27,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+    borderWidth: 1.5, borderColor: 'rgba(0,0,0,0.22)',
+  },
+  paraBtnIconImg: { width: 46, height: 37 },
+  paraBtnLabel: {
+    flex: 1, textAlign: 'center',
+    fontSize: 28, fontWeight: '900', color: '#1A1A1A', letterSpacing: 0.5,
+    textShadowColor: 'rgba(255,255,255,0.45)',
+    textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2,
+  },
+  paraBtnArrowBadge: {
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: 'rgba(0,0,0,0.2)',
+  },
+  paraBtnArrowText: { fontSize: 28, fontWeight: '900', color: '#1A1A1A', marginTop: -2 },
+  // ── Searching / matched pill states ──────────────────────
   paraBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    height: 62, borderRadius: 18, marginVertical: 12, gap: 10,
+    height: 66, borderRadius: 20, marginVertical: 14, gap: 12,
   },
   paraBtnSearching: {
-    backgroundColor: C.surface2,
-    borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border,
   },
   paraBtnMatched: {
     backgroundColor: C.green,
@@ -1217,8 +1275,8 @@ const s = StyleSheet.create({
     shadowOpacity: 0.35, shadowRadius: 12, elevation: 10,
   },
   paraBtnTrikeCircle: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: C.accent,
+    width: 38, height: 38, borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
   paraBtnTrikeImg: { width: 32, height: 26 },
