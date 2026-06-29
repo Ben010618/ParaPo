@@ -1,10 +1,13 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  Alert, Animated, Vibration, ActivityIndicator, Image,
-  ScrollView, Linking, Modal, KeyboardAvoidingView, Platform,
+  Alert, Animated, PanResponder, Dimensions, Vibration, ActivityIndicator, Image,
+  ScrollView, Linking, Modal, KeyboardAvoidingView, Platform, Share,
 } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+
+const SCREEN_H = Dimensions.get('window').height;
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { supabase } from '../lib/supabase';
@@ -14,6 +17,16 @@ import { C, DARK_MAP_STYLE } from '../theme/colors';
 
 const RS = { IDLE: 'idle', SEARCHING: 'searching', MATCHED: 'matched', ARRIVED: 'arrived' };
 const CANCEL_WINDOW_SECS = 60;
+const SAVED_DESTS_KEY = 'parapo_recent_dests';
+const CALAUAN_LANDMARKS = [
+  'Calauan Public Market',
+  'Calauan Municipal Hall',
+  'Calauan National High School',
+  'Calauan Rural Health Unit',
+  'Calauan Church (St. John the Baptist)',
+  'Calauan Bus Terminal',
+  'Calauan Police Station',
+];
 
 const PAX_CANNED = [
   "On my way 🏃",
@@ -53,7 +66,11 @@ const mk = StyleSheet.create({
 });
 
 // ── Destination popout modal ──────────────────────────────────
-function DestinationModal({ visible, value, onChange, onClose }) {
+function DestinationModal({ visible, value, onChange, onClose, savedDests = [], onSelectSaved }) {
+  const filtered = value.trim()
+    ? CALAUAN_LANDMARKS.filter((l) => l.toLowerCase().includes(value.toLowerCase()))
+    : CALAUAN_LANDMARKS;
+
   return (
     <Modal
       visible={visible}
@@ -107,6 +124,48 @@ function DestinationModal({ visible, value, onChange, onClose }) {
             )}
           </View>
 
+          {/* Recent destinations */}
+          {savedDests.length > 0 && !value.trim() && (
+            <View style={dm.chipSection}>
+              <Text style={dm.chipLabel}>Recent</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {savedDests.map((d, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={dm.chip}
+                      onPress={() => { onSelectSaved(d); onClose(); }}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={dm.chipTxt}>🕐 {d}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+          )}
+
+          {/* Landmark suggestions */}
+          {filtered.length > 0 && (
+            <View style={dm.chipSection}>
+              <Text style={dm.chipLabel}>Calauan Landmarks</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {filtered.map((l, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={[dm.chip, dm.chipLandmark]}
+                      onPress={() => { onSelectSaved(l); onClose(); }}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={dm.chipTxt}>📌 {l}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+          )}
+
           {/* Confirm */}
           <TouchableOpacity
             style={[dm.confirmBtn, !value.trim() && dm.confirmBtnDisabled]}
@@ -124,7 +183,7 @@ function DestinationModal({ visible, value, onChange, onClose }) {
   );
 }
 const dm = StyleSheet.create({
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.58)' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.65)' },
   card: {
     backgroundColor: C.surface,
     borderTopLeftRadius: 28, borderTopRightRadius: 28,
@@ -152,6 +211,15 @@ const dm = StyleSheet.create({
   },
   confirmBtnDisabled: { opacity: 0.35 },
   confirmText: { color: '#000', fontWeight: '800', fontSize: 15 },
+  chipSection: { marginBottom: 14 },
+  chipLabel:   { fontSize: 11, fontWeight: '700', color: C.muted, letterSpacing: 0.5 },
+  chip: {
+    backgroundColor: C.surface2, borderRadius: 20,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12, paddingVertical: 7,
+  },
+  chipLandmark: { borderColor: 'rgba(255,193,7,0.25)' },
+  chipTxt: { fontSize: 12, color: C.text, fontWeight: '600' },
 });
 
 // ── Full name helper ──────────────────────────────────────────
@@ -180,11 +248,16 @@ export default function PassengerMapScreen() {
   const mapRef           = useRef(null);
   const mountedRef       = useRef(true);
   const cardAnim         = useRef(new Animated.Value(500)).current;
+  const dragY            = useRef(new Animated.Value(0)).current;
   const searchTimer      = useRef(null);
   const cancelTimerRef   = useRef(null);
   const triedDriverIds   = useRef([]);
   const driversRef       = useRef([]);
   const matchedDriverRef = useRef(null);
+  // smooth marker animation + ETA
+  const driverMarkerRef  = useRef(null);
+  const etaIntervalRef   = useRef(null);
+  const prevDriverCoord  = useRef(null);
 
   const [rideState,        setRideState]        = useState(RS.IDLE);
   const [userLocation,     setUserLocation]     = useState(null);
@@ -204,6 +277,10 @@ export default function PassengerMapScreen() {
   const [selectedReason,   setSelectedReason]   = useState('');
   const [reportDesc,       setReportDesc]       = useState('');
   const [reportSubmitting, setReportSubmitting] = useState(false);
+  const [liveETA,          setLiveETA]          = useState(null);
+  const [savedDests,       setSavedDests]       = useState([]);
+  const [destQuery,        setDestQuery]        = useState('');
+  const [sosContact,       setSosContact]       = useState({ name: 'PNP Calauan', number: '0491-5350147' });
   const msgScrollRef = useRef(null);
 
   const { session } = useAuthStore();
@@ -217,6 +294,55 @@ export default function PassengerMapScreen() {
   // ── Notification permissions ──────────────────────────────────
   useEffect(() => { Notifications.requestPermissionsAsync().catch(() => {}); }, []);
 
+  // ── Load saved recent destinations ────────────────────────────
+  useEffect(() => {
+    AsyncStorage.getItem(SAVED_DESTS_KEY).then((raw) => {
+      if (raw) { try { setSavedDests(JSON.parse(raw)); } catch (_) {} }
+    });
+  }, []);
+
+  // ── Load admin-configurable SOS contact ───────────────────────
+  useEffect(() => {
+    supabase
+      .from('app_settings')
+      .select('key, value')
+      .in('key', ['sos_contact_name', 'sos_contact_number'])
+      .then(({ data }) => {
+        if (!mountedRef.current || !data) return;
+        const map = Object.fromEntries(data.map((r) => [r.key, r.value]));
+        setSosContact({
+          name:   map.sos_contact_name   ?? 'PNP Calauan',
+          number: map.sos_contact_number ?? '0491-5350147',
+        });
+      })
+      .catch(() => {});
+  }, []);
+
+  // ── Auto-fit map to show driver + passenger ───────────────────
+  useEffect(() => {
+    if (!driverLiveCoord || !userLocation || rideState !== RS.MATCHED) return;
+    mapRef.current?.fitToCoordinates(
+      [userLocation, driverLiveCoord],
+      { edgePadding: { top: 80, right: 40, bottom: 400, left: 40 }, animated: true },
+    );
+  }, [driverLiveCoord]);
+
+  // ── Live ETA countdown between GPS updates ────────────────────
+  useEffect(() => {
+    if (!driverLiveCoord || !userLocation) return;
+    const distKm = Math.hypot(
+      driverLiveCoord.latitude  - userLocation.latitude,
+      driverLiveCoord.longitude - userLocation.longitude,
+    ) * 111;
+    const mins = Math.max(1, Math.ceil((distKm / 20) * 60));
+    setLiveETA(mins);
+    clearInterval(etaIntervalRef.current);
+    etaIntervalRef.current = setInterval(() => {
+      setLiveETA((prev) => (prev > 1 ? prev - 1 : 1));
+    }, 60_000);
+    return () => clearInterval(etaIntervalRef.current);
+  }, [driverLiveCoord]);
+
   // ── Mount guard ───────────────────────────────────────────────
   useEffect(() => {
     mountedRef.current = true;
@@ -224,6 +350,7 @@ export default function PassengerMapScreen() {
       mountedRef.current = false;
       clearTimeout(searchTimer.current);
       if (cancelTimerRef.current) clearInterval(cancelTimerRef.current);
+      clearInterval(etaIntervalRef.current);
     };
   }, []);
 
@@ -392,25 +519,50 @@ export default function PassengerMapScreen() {
         table: 'driver_locations',
         filter: `driver_id=eq.${matchedDriver.driver_id}`,
       }, (p) => {
-        if (p.new?.lat && p.new?.lng && mountedRef.current)
-          setDriverLiveCoord({ latitude: p.new.lat, longitude: p.new.lng });
+        if (p.new?.lat && p.new?.lng && mountedRef.current) {
+          const newCoord = { latitude: p.new.lat, longitude: p.new.lng };
+          driverMarkerRef.current?.animateMarkerToCoordinate(newCoord, 800);
+          setDriverLiveCoord(newCoord);
+        }
       }).subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [rideState, matchedDriver?.driver_id]);
 
   // ── Animations ────────────────────────────────────────────────
   const slideCardIn  = useCallback(() => {
-    Animated.spring(cardAnim, { toValue: 0, useNativeDriver: true, bounciness: 6, speed: 14 }).start();
-  }, [cardAnim]);
+    dragY.setValue(0);
+    Animated.spring(cardAnim, { toValue: 0, useNativeDriver: false, bounciness: 6, speed: 14 }).start();
+  }, [cardAnim, dragY]);
 
   const slideCardOut = useCallback((cb) => {
-    Animated.timing(cardAnim, { toValue: 500, useNativeDriver: true, duration: 220 }).start(cb);
-  }, [cardAnim]);
+    dragY.setValue(0);
+    Animated.timing(cardAnim, { toValue: 500, useNativeDriver: false, duration: 220 }).start(cb);
+  }, [cardAnim, dragY]);
 
   const handleRecenter = useCallback(() => {
     if (userLocation)
       mapRef.current?.animateToRegion({ ...userLocation, latitudeDelta: 0.008, longitudeDelta: 0.008 }, 500);
   }, [userLocation]);
+
+  // ── Draggable bottom sheet ────────────────────────────────────
+  // cardAnim: 0 = standard (bottom-aligned), dragY: negative = expanded upward
+  const combinedAnim = useMemo(() => Animated.add(cardAnim, dragY), [cardAnim, dragY]);
+
+  const handleCancelRef = useRef(null);
+  const panResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 8,
+    onPanResponderMove: (_, g) => { dragY.setValue(Math.min(g.dy, 80)); },
+    onPanResponderRelease: (_, g) => {
+      const snapExpanded = -SCREEN_H * 0.36;
+      if (g.dy < -60) {
+        Animated.spring(dragY, { toValue: snapExpanded, useNativeDriver: false, bounciness: 4, speed: 14 }).start();
+      } else if (g.dy > 60) {
+        slideCardOut(() => { handleCancelRef.current?.(false); });
+      } else {
+        Animated.spring(dragY, { toValue: 0, useNativeDriver: false, bounciness: 6, speed: 14 }).start();
+      }
+    },
+  }), [dragY, slideCardOut]);
 
   // ── SOS ───────────────────────────────────────────────────────
   const handleSOS = useCallback(() => {
@@ -421,12 +573,12 @@ export default function PassengerMapScreen() {
       '🆘 Emergency',
       `${driverInfo}\n\nCall emergency services?`,
       [
-        { text: '📞 Call 117 (PNP)', onPress: () => Linking.openURL('tel:117') },
-        { text: '📞 Call 911',       onPress: () => Linking.openURL('tel:911') },
+        { text: `📞 ${sosContact.name}`, onPress: () => Linking.openURL(`tel:${sosContact.number.replace(/[^0-9+]/g, '')}`) },
+        { text: '📞 Call 911',           onPress: () => Linking.openURL('tel:911') },
         { text: 'Cancel', style: 'cancel' },
       ],
     );
-  }, [matchedDriverProfile, activeRide?.id]);
+  }, [matchedDriverProfile, activeRide?.id, sosContact]);
 
   // ── Hail ──────────────────────────────────────────────────────
   const handleParaPo = async () => {
@@ -474,6 +626,13 @@ export default function PassengerMapScreen() {
         setMatchedDriver(nearest);
         setRideState(RS.MATCHED);
         slideCardIn();
+        Vibration.vibrate([0, 100, 80, 200]);
+        // persist recent destination
+        setSavedDests((prev) => {
+          const next = [destination.trim(), ...prev.filter((d) => d !== destination.trim())].slice(0, 6);
+          AsyncStorage.setItem(SAVED_DESTS_KEY, JSON.stringify(next));
+          return next;
+        });
       } catch (e) {
         if (!mountedRef.current) return;
         setRideState(RS.IDLE);
@@ -501,6 +660,9 @@ export default function PassengerMapScreen() {
     if (showSlide) slideCardOut(doReset); else doReset();
   }, [activeRide?.id, cardAnim, slideCardOut, cancelRide, unsubscribeMessages]);
 
+  // Keep ref updated so panResponder can call latest handleCancel
+  handleCancelRef.current = handleCancel;
+
   const handleDone = useCallback(() => {
     if (rating > 0 && activeRide?.id) submitRating(activeRide.id, rating).catch(() => {});
     unsubscribeMessages();
@@ -514,6 +676,15 @@ export default function PassengerMapScreen() {
       setDriverLiveCoord(null);
     });
   }, [slideCardOut, rating, activeRide?.id, submitRating, unsubscribeMessages]);
+
+  const handleShareTrip = useCallback(() => {
+    const dName = fullName(matchedDriverProfile);
+    const plate = matchedDriverProfile?.plate_number ? ` · Plate: ${matchedDriverProfile.plate_number}` : '';
+    const rideId = activeRide?.id?.slice(0, 8) ?? '—';
+    Share.share({
+      message: `I'm riding a Para Po tricycle now!\nDriver: ${dName}${plate}\nRide ID: ${rideId}\n\nTrack or download Para Po for Calauan, Laguna.`,
+    }).catch(() => {});
+  }, [matchedDriverProfile, activeRide?.id]);
 
   const handleSendMessage = useCallback((msg) => {
     if (!activeRide?.id || !session?.user?.id) return;
@@ -614,13 +785,23 @@ export default function PassengerMapScreen() {
         {/* Matched driver — live position */}
         {driverLiveCoord && (
           <Marker
+            ref={driverMarkerRef}
             key="matched-driver-live"
             coordinate={driverLiveCoord}
             anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
           >
             <DriverMarker pulse />
           </Marker>
+        )}
+
+        {/* Route polyline: driver → passenger */}
+        {driverLiveCoord && userLocation && rideState === RS.MATCHED && (
+          <Polyline
+            coordinates={[driverLiveCoord, userLocation]}
+            strokeColor="#FFC107"
+            strokeWidth={3}
+            lineDashPattern={[8, 6]}
+          />
         )}
       </MapView>
 
@@ -720,6 +901,22 @@ export default function PassengerMapScreen() {
             </View>
           )}
 
+          {/* Fare estimate strip — shown when destination is set and idle */}
+          {rideState === RS.IDLE && destination.trim() && (
+            <View style={s.fareEstimateRow}>
+              <Text style={s.fareEstimateIcon}>💰</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.fareEstimateVal}>Est. ₱10–₱30</Text>
+                <Text style={s.fareEstimateSub}>Agree final fare via chat · Cash only</Text>
+              </View>
+              {drivers.length > 0 && (
+                <View style={s.fareEstimateBadge}>
+                  <Text style={s.fareEstimateBadgeTxt}>{drivers.length} nearby</Text>
+                </View>
+              )}
+            </View>
+          )}
+
           {rideState === RS.SEARCHING ? (
             <View style={[s.paraBtn, s.paraBtnSearching]}>
               <ActivityIndicator color={C.accent} size="small" />
@@ -761,7 +958,10 @@ export default function PassengerMapScreen() {
 
       {/* ── DRIVER MATCHED / ARRIVED CARD ── */}
       {isCardVisible && (
-        <Animated.View style={[s.driverCard, { transform: [{ translateY: cardAnim }] }]}>
+        <Animated.View
+          style={[s.driverCard, { transform: [{ translateY: combinedAnim }] }]}
+          {...panResponder.panHandlers}
+        >
 
           {/* MATCHED */}
           {rideState === RS.MATCHED && (
@@ -790,9 +990,9 @@ export default function PassengerMapScreen() {
                     <Text style={s.driverIdPlateNum}>{driverProfile.plate_number}</Text>
                   </View>
                 ) : null}
-                {etaMinutes ? (
+                {(liveETA ?? etaMinutes) ? (
                   <View style={s.driverIdETA}>
-                    <Text style={s.driverIdETAVal}>~{etaMinutes}</Text>
+                    <Text style={s.driverIdETAVal}>~{liveETA ?? etaMinutes}</Text>
                     <Text style={s.driverIdETALabel}>min</Text>
                   </View>
                 ) : null}
@@ -985,6 +1185,11 @@ export default function PassengerMapScreen() {
                 </View>
               )}
 
+              {/* Share Trip button */}
+              <TouchableOpacity style={s.shareTripBtn} onPress={handleShareTrip} activeOpacity={0.8}>
+                <Text style={s.shareTripTxt}>Share Trip Details</Text>
+              </TouchableOpacity>
+
               {/* Cancel — 60-second grace window only */}
               {cancelSecsLeft > 0 ? (
                 <TouchableOpacity
@@ -1122,7 +1327,7 @@ export default function PassengerMapScreen() {
                 activeOpacity={0.85}
               >
                 {reportSubmitting
-                  ? <ActivityIndicator size="small" color="#000" />
+                  ? <ActivityIndicator size="small" color="#fff" />
                   : <Text style={s.reportSubmitText}>Submit Report</Text>}
               </TouchableOpacity>
             </View>
@@ -1136,6 +1341,8 @@ export default function PassengerMapScreen() {
         value={destination}
         onChange={setDestination}
         onClose={() => setDestModalVisible(false)}
+        savedDests={savedDests}
+        onSelectSaved={(d) => setDestination(d)}
       />
     </View>
   );
@@ -1328,14 +1535,38 @@ const s = StyleSheet.create({
   cannedBtn:   { backgroundColor: C.surface2, borderRadius: 20, borderWidth: 1, borderColor: C.border, paddingHorizontal: 16, paddingVertical: 10 },
   cannedText:  { fontSize: 13, color: C.text, fontWeight: '600' },
 
+  // ── Fare estimate ──────────────────────────────────────────────
+  fareEstimateRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: 'rgba(255,193,7,0.08)', borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(255,193,7,0.22)',
+    paddingHorizontal: 14, paddingVertical: 10, marginBottom: 6,
+  },
+  fareEstimateIcon: { fontSize: 20 },
+  fareEstimateVal:  { fontSize: 15, fontWeight: '800', color: C.accent },
+  fareEstimateSub:  { fontSize: 11, color: C.muted, marginTop: 1 },
+  fareEstimateBadge: {
+    backgroundColor: 'rgba(34,197,94,0.15)', borderRadius: 8,
+    borderWidth: 1, borderColor: 'rgba(34,197,94,0.3)',
+    paddingHorizontal: 8, paddingVertical: 4,
+  },
+  fareEstimateBadgeTxt: { fontSize: 11, color: C.green, fontWeight: '700' },
+
+  // ── Share Trip ─────────────────────────────────────────────────
+  shareTripBtn: {
+    borderRadius: 999, borderWidth: 1, borderColor: 'rgba(255,193,7,0.35)',
+    padding: 13, alignItems: 'center', backgroundColor: 'rgba(255,193,7,0.07)', marginBottom: 6,
+  },
+  shareTripTxt: { color: C.accent, fontSize: 14, fontWeight: '800', letterSpacing: 0.5 },
+
   cancelBtn: {
-    borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    borderRadius: 999, borderWidth: 1, borderColor: 'rgba(244,63,94,0.30)',
     padding: 15, alignItems: 'center', backgroundColor: C.redDim, marginTop: 4,
   },
-  cancelText:  { color: C.red, fontSize: 15, fontWeight: '700' },
+  cancelText:  { color: C.red, fontSize: 15, fontWeight: '800', letterSpacing: 0.5 },
   cancelTimer: { fontSize: 11, color: C.red, opacity: 0.7, marginTop: 3 },
   cancelLocked: {
-    borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    borderRadius: 18, borderWidth: 1, borderColor: C.border,
     backgroundColor: C.surface2, padding: 16, alignItems: 'center', marginTop: 4, gap: 4,
   },
   cancelLockedIcon: { fontSize: 20 },
@@ -1369,9 +1600,9 @@ const s = StyleSheet.create({
 
   // ── Chat (WhatsApp-style) ─────────────────────────────────
   chatWrap: {
-    borderRadius: 16, overflow: 'hidden',
-    borderWidth: 1, borderColor: 'rgba(255,193,7,0.2)',
-    backgroundColor: '#0E1520', marginBottom: 8,
+    borderRadius: 20, overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(255,193,7,0.22)',
+    backgroundColor: '#0C0F1C', marginBottom: 8,
   },
   chatHdr: {
     paddingHorizontal: 14, paddingVertical: 9,
@@ -1395,7 +1626,7 @@ const s = StyleSheet.create({
   msgBubbleWrap: { maxWidth: '78%', alignItems: 'flex-start' },
   msgBubble:     { borderRadius: 18, paddingHorizontal: 13, paddingVertical: 9 },
   msgBubbleMe:   { backgroundColor: '#FFC107', borderBottomRightRadius: 4 },
-  msgBubbleThem: { backgroundColor: '#1A2535', borderBottomLeftRadius: 4 },
+  msgBubbleThem: { backgroundColor: '#161B2A', borderBottomLeftRadius: 4 },
   msgBubbleFare: { borderWidth: 1, borderColor: 'rgba(255,193,7,0.55)' },
   msgText:       { fontSize: 14 },
   msgTextMe:     { color: '#1A1A1A', fontWeight: '500' },
@@ -1433,8 +1664,8 @@ const s = StyleSheet.create({
   fareRowLabel:  { fontSize: 13, color: C.accent, fontWeight: '700' },
   fareInput:     { flex: 1, fontSize: 18, color: C.text, fontWeight: '700' },
   fareSendBtn: {
-    backgroundColor: C.accent, borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 7,
+    backgroundColor: C.accent, borderRadius: 999,
+    paddingHorizontal: 16, paddingVertical: 8,
   },
   fareSendText:  { color: '#000', fontWeight: '800', fontSize: 13 },
   fareCancelBtn: { padding: 6 },
@@ -1442,10 +1673,10 @@ const s = StyleSheet.create({
   // ── Fare bubble extras ────────────────────────────────────
   msgBubbleFare: { borderWidth: 1.5, borderColor: C.accent + '66' },
   agreeBtn:      {
-    marginTop: 8, backgroundColor: C.accent, borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 7, alignSelf: 'flex-start',
+    marginTop: 8, backgroundColor: C.accent, borderRadius: 999,
+    paddingHorizontal: 16, paddingVertical: 8, alignSelf: 'flex-start',
   },
-  agreeBtnText:  { fontSize: 13, fontWeight: '800', color: '#000' },
+  agreeBtnText:  { fontSize: 13, fontWeight: '900', color: '#07080F', letterSpacing: 0.3 },
   agreedLabel:   { fontSize: 11, color: C.green, fontWeight: '700', marginTop: 6 },
 
   // ── Trip summary card ────────────────────────────────────
@@ -1479,7 +1710,7 @@ const s = StyleSheet.create({
   reportTitle:   { fontSize: 17, fontWeight: '800', color: C.text, marginBottom: 6 },
   reportSub:     { fontSize: 13, color: C.muted, marginBottom: 14 },
   reportOption:  {
-    padding: 13, borderRadius: 12,
+    padding: 14, borderRadius: 999,
     borderWidth: 1, borderColor: C.border,
     backgroundColor: C.surface2, marginBottom: 8,
   },
@@ -1494,17 +1725,22 @@ const s = StyleSheet.create({
   },
   reportBtnRow:    { flexDirection: 'row', gap: 10 },
   reportCancelBtn: {
-    flex: 1, padding: 14, borderRadius: 12,
+    flex: 1, padding: 14, borderRadius: 999,
     backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border, alignItems: 'center',
   },
-  reportSubmitBtn:  { flex: 2, padding: 14, borderRadius: 12, backgroundColor: C.red, alignItems: 'center' },
-  reportSubmitText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  reportSubmitBtn:  { flex: 2, padding: 14, borderRadius: 999, backgroundColor: C.red, alignItems: 'center' },
+  reportSubmitText: { color: '#fff', fontWeight: '800', fontSize: 14, letterSpacing: 0.5 },
 
   // ── Arrived + Rating ─────────────────────────────────────
   arrivedWrap:  { alignItems: 'center', paddingVertical: 8 },
   arrivedTitle: { fontSize: 28, fontWeight: '900', color: C.green, marginTop: 8 },
   ratePrompt:   { fontSize: 16, fontWeight: '700', color: C.text, marginTop: 4 },
   rateLabel:    { fontSize: 14, color: C.accent, fontWeight: '600', marginBottom: 4 },
-  doneBtn:      { backgroundColor: C.accent, borderRadius: 16, paddingHorizontal: 32, paddingVertical: 16, marginTop: 10 },
-  doneBtnText:  { fontSize: 15, fontWeight: '800', color: '#000' },
+  doneBtn: {
+    backgroundColor: C.accent, borderRadius: 999,
+    paddingHorizontal: 40, paddingVertical: 17, marginTop: 10,
+    shadowColor: '#FFC107', shadowOpacity: 0.45, shadowRadius: 18,
+    shadowOffset: { width: 0, height: 5 }, elevation: 8,
+  },
+  doneBtnText: { fontSize: 15, fontWeight: '900', color: '#07080F', letterSpacing: 1 },
 });

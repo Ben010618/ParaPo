@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Linking } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Notifications from 'expo-notifications';
 import { supabase } from './src/lib/supabase';
@@ -48,7 +48,23 @@ export default function App() {
       if (newSession?.user?.id) fetchProfile(newSession.user.id);
     });
 
-    return () => { subscription?.unsubscribe(); };
+    // Handle Google OAuth deep-link callback: parapo://auth/callback#access_token=...
+    const handleDeepLink = ({ url }) => {
+      if (!url) return;
+      const fragment = url.split('#')[1] ?? url.split('?')[1] ?? '';
+      const params = new URLSearchParams(fragment);
+      const accessToken  = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+      if (accessToken && refreshToken) {
+        supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+          .catch(() => {});
+      }
+    };
+
+    Linking.getInitialURL().then((url) => { if (url) handleDeepLink({ url }); }).catch(() => {});
+    const urlSub = Linking.addEventListener('url', handleDeepLink);
+
+    return () => { subscription?.unsubscribe(); urlSub.remove(); };
   }, []);
 
   if (loading) {

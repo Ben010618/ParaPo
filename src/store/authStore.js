@@ -246,6 +246,43 @@ export const useAuthStore = create((set, get) => ({
     return data;
   },
 
+  // ── Phone OTP ──────────────────────────────────────────────────
+  signInWithPhone: async (phone) => {
+    const { error } = await supabase.auth.signInWithOtp({ phone });
+    if (error) throw error;
+  },
+
+  verifyOtp: async (phone, token) => {
+    const { data, error } = await supabase.auth.verifyOtp({ phone, token, type: 'sms' });
+    if (error) throw error;
+    if (data?.user?.id) {
+      const { data: p } = await supabase
+        .from('profiles').select('is_disabled, disabled_reason').eq('id', data.user.id).single();
+      if (p?.is_disabled) {
+        await supabase.auth.signOut();
+        throw new Error(
+          p.disabled_reason
+            ? `Account suspended: ${p.disabled_reason}`
+            : 'Your account has been suspended. Please contact the administrator.',
+        );
+      }
+    }
+    return data;
+  },
+
+  // ── Google OAuth ───────────────────────────────────────────────
+  signInWithGoogle: async () => {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: 'parapo://auth/callback',
+        skipBrowserRedirect: true,
+      },
+    });
+    if (error) throw error;
+    return data?.url;
+  },
+
   signOut: async () => {
     try { await supabase.auth.signOut(); } catch (_) {}
     set({ session: null, profile: null });

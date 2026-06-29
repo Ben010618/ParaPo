@@ -1,66 +1,119 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, Image, ActivityIndicator } from 'react-native';
+import { Text, View, Image, ActivityIndicator, TouchableOpacity, StyleSheet } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import PassengerMapScreen from '../screens/PassengerMapScreen';
-import DriverScreen from '../screens/DriverScreen';
-import AdminScreen from '../screens/AdminScreen';
-import HistoryScreen from '../screens/HistoryScreen';
-import ProfileScreen from '../screens/ProfileScreen';
-import { useAuthStore } from '../store/authStore';
-import { C } from '../theme/colors';
+import DriverScreen       from '../screens/DriverScreen';
+import AdminScreen        from '../screens/AdminScreen';
+import HistoryScreen      from '../screens/HistoryScreen';
+import ProfileScreen      from '../screens/ProfileScreen';
+import OnboardingScreen   from '../screens/OnboardingScreen';
+import { useAuthStore }   from '../store/authStore';
+import { C, SHADOW }      from '../theme/colors';
 
 const Tab = createBottomTabNavigator();
 const TRAYSIKEL_IMAGE = require('../../assets/traysikel.png');
+const ONBOARDING_KEY  = 'parapo_onboarding_v1';
 
+// ── Generic emoji tab icon ────────────────────────────────────
 function TabIcon({ emoji, focused }) {
   return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 2 }}>
-      <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.45 }}>{emoji}</Text>
+    <View style={[ti.wrap, focused && ti.wrapActive]}>
+      <Text style={[ti.emoji, focused && ti.emojiActive]}>{emoji}</Text>
+      {focused && <View style={ti.dot} />}
     </View>
   );
 }
 
+// ── Traysikel map tab icon ────────────────────────────────────
 function TrikeTabIcon({ focused }) {
   return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', paddingTop: 2, opacity: focused ? 1 : 0.45 }}>
-      <View style={{
-        width: 28, height: 28, borderRadius: 14,
-        backgroundColor: C.accent,
-        alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-      }}>
-        <Image source={TRAYSIKEL_IMAGE} style={{ width: 24, height: 20 }} resizeMode="contain" />
+    <View style={[ti.wrap, focused && ti.wrapActive]}>
+      <View style={[ti.trikeRing, focused && ti.trikeRingActive]}>
+        <Image
+          source={TRAYSIKEL_IMAGE}
+          style={focused ? ti.trikeImgActive : ti.trikeImg}
+          resizeMode="contain"
+        />
       </View>
+      {focused && <View style={ti.dot} />}
     </View>
   );
 }
 
+const ti = StyleSheet.create({
+  wrap:       { alignItems: 'center', paddingTop: 2, gap: 3, minWidth: 56, paddingHorizontal: 6 },
+  wrapActive: { backgroundColor: 'rgba(255,193,7,0.07)', borderRadius: 14 },
+  emoji:      { fontSize: 20, opacity: 0.38 },
+  emojiActive:{ opacity: 1, fontSize: 21 },
+
+  trikeRing: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: 'rgba(255,193,7,0.14)',
+    borderWidth: 1, borderColor: 'rgba(255,193,7,0.22)',
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  trikeRingActive: {
+    backgroundColor: C.accent,
+    borderColor: C.accent,
+    ...SHADOW.glow,
+  },
+  trikeImg:       { width: 23, height: 19 },
+  trikeImgActive: { width: 23, height: 19 },
+
+  dot: {
+    width: 5, height: 5, borderRadius: 999,
+    backgroundColor: C.accent,
+    shadowColor: C.accent, shadowOpacity: 0.9, shadowRadius: 5, elevation: 4,
+  },
+});
+
+// ── Tab bar visual config ─────────────────────────────────────
 const TAB_BAR_STYLE = {
   backgroundColor: C.surface,
-  borderTopColor: C.border,
-  borderTopWidth: 1,
-  paddingBottom: 8,
-  paddingTop: 6,
-  height: 62,
+  borderTopColor:  'rgba(255,193,7,0.12)',
+  borderTopWidth:  1,
+  paddingBottom:   10,
+  paddingTop:      8,
+  height:          66,
 };
 
 const HEADER_STYLE = {
   backgroundColor: C.surface,
   borderBottomColor: C.border,
   borderBottomWidth: 1,
-  elevation: 0,
-  shadowOpacity: 0,
+  elevation: 0, shadowOpacity: 0,
 };
 
+// ── Navigator ─────────────────────────────────────────────────
 export default function AppNavigator() {
   const profile = useAuthStore((s) => s.profile);
+  const [onboardingDone, setOnboardingDone] = useState(null);
 
-  // profile is always pre-filled from session metadata before this renders,
-  // so this guard is just a safety net for unexpected null state.
-  if (!profile) {
+  useEffect(() => {
+    AsyncStorage.getItem(ONBOARDING_KEY).then((v) => setOnboardingDone(v === 'true'));
+  }, []);
+
+  if (!profile || onboardingDone === null) {
     return (
       <View style={{ flex: 1, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color={C.accent} />
+        <View style={nav.splashRing}>
+          <Image source={TRAYSIKEL_IMAGE} style={nav.splashTrike} resizeMode="contain" />
+        </View>
+        <ActivityIndicator size="large" color={C.accent} style={{ marginTop: 24 }} />
       </View>
+    );
+  }
+
+  if (!onboardingDone) {
+    return (
+      <OnboardingScreen
+        onDone={() => {
+          AsyncStorage.setItem(ONBOARDING_KEY, 'true');
+          setOnboardingDone(true);
+        }}
+      />
     );
   }
 
@@ -69,43 +122,44 @@ export default function AppNavigator() {
   return (
     <Tab.Navigator
       screenOptions={{
-        headerStyle: HEADER_STYLE,
-        headerTintColor: C.text,
-        headerTitleStyle: { fontWeight: '700', color: C.text },
-        tabBarActiveTintColor: C.accent,
-        tabBarInactiveTintColor: C.muted,
-        tabBarStyle: TAB_BAR_STYLE,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
+        headerStyle:      HEADER_STYLE,
+        headerTintColor:  C.text,
+        headerTitleStyle: { fontWeight: '800', color: C.text, letterSpacing: -0.3 },
+        tabBarActiveTintColor:   C.accent,
+        tabBarInactiveTintColor: C.muted2,
+        tabBarStyle:      TAB_BAR_STYLE,
+        tabBarLabelStyle: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5, marginTop: -2 },
       }}
     >
-      {/* Passenger */}
+      {/* Passenger map */}
       {role === 'passenger' && (
         <Tab.Screen
           name="Map"
           component={PassengerMapScreen}
           options={{
-            title: 'ParaPo',
+            title: 'Para Po!',
             headerShown: false,
             tabBarLabel: 'Mapa',
-            tabBarIcon: ({ focused }) => <TabIcon emoji="🗺️" focused={focused} />,
+            tabBarIcon: ({ focused }) => <TrikeTabIcon focused={focused} />,
           }}
         />
       )}
 
-      {/* Driver */}
+      {/* Driver dashboard */}
       {role === 'driver' && (
         <Tab.Screen
           name="Driver"
           component={DriverScreen}
           options={{
             title: 'Dashboard',
+            headerStyle: { ...HEADER_STYLE, backgroundColor: C.bg },
             tabBarLabel: 'Dashboard',
             tabBarIcon: ({ focused }) => <TrikeTabIcon focused={focused} />,
           }}
         />
       )}
 
-      {/* Admin */}
+      {/* Admin panel */}
       {role === 'admin' && (
         <Tab.Screen
           name="Admin"
@@ -140,3 +194,12 @@ export default function AppNavigator() {
     </Tab.Navigator>
   );
 }
+
+const nav = StyleSheet.create({
+  splashRing: {
+    width: 96, height: 96, borderRadius: 28,
+    backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
+    ...SHADOW.glow,
+  },
+  splashTrike: { width: 80, height: 62 },
+});

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  Alert, Animated, Switch, Vibration, ScrollView, Image, Linking,
+  Alert, Animated, Vibration, ScrollView, Image, Linking,
   Modal, ActivityIndicator,
 } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -47,17 +47,20 @@ const DS = {
 };
 
 export default function DriverScreen() {
-  const mountedRef     = useRef(true);
-  const driverStateRef = useRef(DS.OFFLINE);
-  const reqCardAnim    = useRef(new Animated.Value(500)).current;
-  const activeCardAnim = useRef(new Animated.Value(500)).current;
-  const timerTimeout   = useRef(null);
-  const msgScrollRef   = useRef(null);
+  const mountedRef       = useRef(true);
+  const driverStateRef   = useRef(DS.OFFLINE);
+  const reqCardAnim      = useRef(new Animated.Value(500)).current;
+  const activeCardAnim   = useRef(new Animated.Value(500)).current;
+  const timerTimeout     = useRef(null);
+  const timerIntervalRef = useRef(null);
+  const timerAnim        = useRef(new Animated.Value(1)).current;
+  const msgScrollRef     = useRef(null);
 
   const [driverState,      setDriverState]      = useState(DS.OFFLINE);
   const [toggling,         setToggling]         = useState(false);
   const [ridesCount,       setRidesCount]       = useState(0);
   const [onlineSeconds,    setOnlineSeconds]    = useState(0);
+  const [timerSecs,        setTimerSecs]        = useState(15);
   const [freeText,         setFreeText]         = useState('');
   const [fareInput,        setFareInput]        = useState('');
   const [showFareInput,    setShowFareInput]    = useState(false);
@@ -147,16 +150,29 @@ export default function DriverScreen() {
     Animated.timing(activeCardAnim, { toValue: 500, useNativeDriver: true, duration: 200 }).start(cb);
   }, [activeCardAnim]);
 
-  // ── 15-second auto-decline timer (no visual bar) ─────────
+  // ── 15-second countdown with animated bar ─────────────────
   const startTimer = useCallback(() => {
+    setTimerSecs(15);
+    timerAnim.setValue(1);
+    Animated.timing(timerAnim, { toValue: 0, duration: 15000, useNativeDriver: false }).start();
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    let s = 15;
+    timerIntervalRef.current = setInterval(() => {
+      s -= 1;
+      if (mountedRef.current) setTimerSecs(Math.max(0, s));
+      if (s <= 0) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null; }
+    }, 1000);
     timerTimeout.current = setTimeout(() => {
       if (mountedRef.current && driverStateRef.current === DS.INCOMING) handleDecline(true);
     }, 15000);
-  }, [handleDecline]);
+  }, [handleDecline, timerAnim]);
 
   const stopTimer = useCallback(() => {
     clearTimeout(timerTimeout.current);
-  }, []);
+    clearInterval(timerIntervalRef.current);
+    timerIntervalRef.current = null;
+    timerAnim.stopAnimation();
+  }, [timerAnim]);
 
   // ── Toggle ────────────────────────────────────────────────
   const handleToggle = async () => {
@@ -185,6 +201,7 @@ export default function DriverScreen() {
       try {
         await respondToRide(incomingRequest.id, true);
         if (!mountedRef.current) return;
+        Vibration.vibrate([0, 60, 40, 120]);
         subscribeMessages(incomingRequest.id);
         setDriverState(DS.PICKUP);
         showActiveCard();
@@ -314,27 +331,30 @@ export default function DriverScreen() {
     <View style={s.root}>
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* ── ONLINE / OFFLINE HERO ── */}
-        <View style={[s.statusHero, isOnline && s.statusHeroOnline]}>
-          <View style={s.statusLeft}>
-            <View style={[s.statusDotLarge, !isOnline && s.statusDotOff]} />
-            <View>
-              <Text style={s.statusTitle}>{isOnline ? "You're Online" : "You're Offline"}</Text>
-              <Text style={s.statusSub}>
-                {isOnline ? 'Accepting rides · Sharing location' : 'Toggle to start receiving rides'}
-              </Text>
-            </View>
+        {/* ── ONLINE / OFFLINE HERO TOGGLE ── */}
+        <TouchableOpacity
+          style={[s.toggleHero, isOnline && s.toggleHeroOn]}
+          onPress={handleToggle}
+          disabled={toggling}
+          activeOpacity={0.88}
+        >
+          <View style={[s.toggleDot, !isOnline && s.toggleDotOff]} />
+          <View style={{ flex: 1 }}>
+            <Text style={[s.toggleTitle, isOnline && { color: C.green }]}>
+              {toggling ? 'Switching…' : isOnline ? "You're Online" : "You're Offline"}
+            </Text>
+            <Text style={s.toggleSub}>
+              {isOnline ? 'Accepting rides · GPS active' : 'Tap to start receiving rides'}
+            </Text>
           </View>
-          <View style={s.switchWrap}>
-            <Switch
-              value={isOnline}
-              onValueChange={handleToggle}
-              disabled={toggling}
-              trackColor={{ false: C.surface3, true: 'rgba(34,197,94,0.45)' }}
-              thumbColor={isOnline ? C.green : C.muted}
-            />
-          </View>
-        </View>
+          {toggling
+            ? <ActivityIndicator size="small" color={isOnline ? C.green : C.muted} />
+            : <View style={[s.togglePill, isOnline && s.togglePillOn]}>
+                <Text style={[s.togglePillTxt, isOnline && { color: '#07080F' }]}>
+                  {isOnline ? 'ONLINE' : 'OFFLINE'}
+                </Text>
+              </View>}
+        </TouchableOpacity>
 
         {/* ── STATS STRIP ── */}
         <View style={s.earningsStrip}>
@@ -405,11 +425,28 @@ export default function DriverScreen() {
         {/* ── COMPLETE STATE ── */}
         {driverState === DS.COMPLETE && (
           <View style={s.completeCard}>
-            <Text style={{ fontSize: 56 }}>🎉</Text>
+            <View style={s.completeBadge}>
+              <View style={s.completeBadgeTrikeWrap}>
+                <Image source={TRAYSIKEL_IMAGE} style={s.completeBadgeTrikeImg} resizeMode="contain" />
+              </View>
+            </View>
             <Text style={s.completeTitle}>Ride Complete!</Text>
             <Text style={s.completeSub}>Salamat, Kuya! Great job today.{'\n'}Nakatulong ka ng isang pasahero.</Text>
+            <View style={s.completeStatsRow}>
+              <View style={s.completeStat}>
+                <Text style={s.completeStatVal}>{ridesCount}</Text>
+                <Text style={s.completeStatLbl}>Rides Today</Text>
+              </View>
+              <View style={s.completeStatDivider} />
+              <View style={s.completeStat}>
+                <Text style={[s.completeStatVal, { color: C.accent }]}>
+                  {profile?.average_rating ? `⭐ ${profile.average_rating.toFixed(1)}` : '—'}
+                </Text>
+                <Text style={s.completeStatLbl}>Avg Rating</Text>
+              </View>
+            </View>
             <TouchableOpacity style={s.doneBtn} onPress={handleDone} activeOpacity={0.85}>
-              <Text style={s.doneBtnText}>Done</Text>
+              <Text style={s.doneBtnText}>Next Ride →</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.reportLinkBtn} onPress={() => setShowReportModal(true)}>
               <Text style={s.reportLinkText}>⚠️ Report a passenger issue</Text>
@@ -472,13 +509,29 @@ export default function DriverScreen() {
 
       {/* ── INCOMING REQUEST CARD ── */}
       <Animated.View style={[s.slideCard, { transform: [{ translateY: reqCardAnim }] }]}>
+        {/* Countdown progress bar — top edge of card */}
+        <View style={s.countdownTrack}>
+          <Animated.View style={[s.countdownBar, {
+            width: timerAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+            backgroundColor: timerAnim.interpolate({
+              inputRange: [0, 0.3, 1],
+              outputRange: [C.red, C.warning, C.green],
+            }),
+          }]} />
+        </View>
+
         <View style={s.slideHandle} />
 
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-          <View style={s.reqBadgeTrikeWrap}>
-            <Image source={TRAYSIKEL_IMAGE} style={s.reqBadgeTrikeImg} resizeMode="contain" />
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={s.reqBadgeTrikeWrap}>
+              <Image source={TRAYSIKEL_IMAGE} style={s.reqBadgeTrikeImg} resizeMode="contain" />
+            </View>
+            <Text style={s.reqBadge}>NEW REQUEST</Text>
           </View>
-          <Text style={s.reqBadge}>NEW PASSENGER REQUEST</Text>
+          <View style={s.countdownPill}>
+            <Text style={s.countdownPillTxt}>{timerSecs}s</Text>
+          </View>
         </View>
 
         {/* Avatar + Identity */}
@@ -764,29 +817,44 @@ const s = StyleSheet.create({
   root:   { flex: 1, backgroundColor: C.bg },
   scroll: { padding: 16, paddingBottom: 120, gap: 12 },
 
-  // ── Status hero ───────────────────────────────────────────
-  statusHero: {
-    backgroundColor: C.surface, borderRadius: 18,
-    padding: 18, flexDirection: 'row', alignItems: 'center',
+  // ── Online/offline hero toggle ─────────────────────────────
+  toggleHero: {
+    backgroundColor: C.surface, borderRadius: 20,
+    padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14,
+    borderWidth: 1.5, borderColor: C.border,
+    shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 10, elevation: 4,
+  },
+  toggleHeroOn: {
+    borderColor: 'rgba(16,185,129,0.45)',
+    backgroundColor: '#0D1A12',
+    shadowColor: C.green, shadowOpacity: 0.22, shadowRadius: 14,
+  },
+  toggleDot: {
+    width: 13, height: 13, borderRadius: 7,
+    backgroundColor: C.green,
+    shadowColor: C.green, shadowOpacity: 1, shadowRadius: 8, elevation: 6,
+  },
+  toggleDotOff: { backgroundColor: C.muted, shadowOpacity: 0 },
+  toggleTitle:  { fontSize: 17, fontWeight: '800', color: C.text },
+  toggleSub:    { fontSize: 12, color: C.muted, marginTop: 2 },
+  togglePill: {
+    backgroundColor: C.surface3, borderRadius: 999,
+    paddingHorizontal: 14, paddingVertical: 6,
     borderWidth: 1, borderColor: C.border,
   },
-  statusHeroOnline: { borderColor: 'rgba(34,197,94,0.35)', backgroundColor: '#141f14' },
-  statusLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  statusDotLarge: {
-    width: 12, height: 12, borderRadius: 6,
+  togglePillOn: {
     backgroundColor: C.green,
-    shadowColor: C.green, shadowOpacity: 0.9, shadowRadius: 6,
+    borderColor: 'rgba(16,185,129,0.6)',
+    shadowColor: C.green, shadowOpacity: 0.5, shadowRadius: 8, elevation: 4,
   },
-  statusDotOff: { backgroundColor: C.muted, shadowOpacity: 0 },
-  statusTitle:  { fontSize: 16, fontWeight: '700', color: C.text },
-  statusSub:    { fontSize: 12, color: C.muted, marginTop: 2 },
-  switchWrap:   { marginLeft: 8 },
+  togglePillTxt: { fontSize: 11, fontWeight: '900', color: C.muted, letterSpacing: 1 },
 
-  // ── Stats strip (no prices) ───────────────────────────────
+  // ── Stats strip ───────────────────────────────────────────
   earningsStrip: {
-    backgroundColor: C.surface, borderRadius: 18,
+    backgroundColor: C.surface, borderRadius: 20,
     flexDirection: 'row', alignItems: 'center',
     borderWidth: 1, borderColor: C.border, overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 10, elevation: 4,
   },
   earnItem:    { flex: 1, padding: 16, alignItems: 'center' },
   earnDivider: { width: 1, height: 40, backgroundColor: C.border },
@@ -796,9 +864,10 @@ const s = StyleSheet.create({
   // ── Stats row ─────────────────────────────────────────────
   statsRow: { flexDirection: 'row', gap: 10 },
   statCard: {
-    flex: 1, backgroundColor: C.surface, borderRadius: 14,
+    flex: 1, backgroundColor: C.surface, borderRadius: 16,
     padding: 14, alignItems: 'center',
     borderWidth: 1, borderColor: C.border,
+    shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 8, elevation: 3,
   },
   statIcon:     { fontSize: 20, marginBottom: 6 },
   statTrikeWrap: {
@@ -829,38 +898,76 @@ const s = StyleSheet.create({
   waitTitle: { fontSize: 18, fontWeight: '800', color: C.text, textAlign: 'center' },
   waitSub:   { fontSize: 13, color: C.muted, textAlign: 'center', marginTop: 8, lineHeight: 20 },
   goOnlineBtn: {
-    marginTop: 20, backgroundColor: C.green, borderRadius: 14,
-    paddingHorizontal: 32, paddingVertical: 12,
+    marginTop: 20, backgroundColor: C.green, borderRadius: 999,
+    paddingHorizontal: 36, paddingVertical: 14,
+    shadowColor: C.green, shadowOpacity: 0.45, shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 }, elevation: 8,
   },
-  goOnlineBtnText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  goOnlineBtnText: { color: '#fff', fontWeight: '900', fontSize: 14, letterSpacing: 0.5 },
 
   // ── Complete card ─────────────────────────────────────────
   completeCard: {
-    backgroundColor: C.surface, borderRadius: 18,
-    padding: 32, alignItems: 'center',
-    borderWidth: 1, borderColor: 'rgba(34,197,94,0.3)',
+    backgroundColor: C.surface, borderRadius: 20,
+    padding: 28, alignItems: 'center',
+    borderWidth: 1.5, borderColor: 'rgba(16,185,129,0.35)',
+    shadowColor: C.green, shadowOpacity: 0.15, shadowRadius: 18, elevation: 6,
   },
-  completeTitle: { fontSize: 26, fontWeight: '900', color: C.accent, marginTop: 12 },
-  completeSub:   { fontSize: 14, color: C.muted, marginTop: 12, textAlign: 'center', lineHeight: 22 },
+  completeBadge: {
+    width: 88, height: 88, borderRadius: 44,
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    borderWidth: 2, borderColor: 'rgba(16,185,129,0.4)',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+    shadowColor: C.green, shadowOpacity: 0.35, shadowRadius: 14, elevation: 6,
+  },
+  completeBadgeTrikeWrap: { width: 60, height: 48, alignItems: 'center', justifyContent: 'center' },
+  completeBadgeTrikeImg:  { width: 58, height: 46 },
+  completeTitle: { fontSize: 24, fontWeight: '900', color: C.green, marginTop: 14, letterSpacing: -0.3 },
+  completeSub:   { fontSize: 13, color: C.muted, marginTop: 8, textAlign: 'center', lineHeight: 20 },
+  completeStatsRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: C.surface2, borderRadius: 16,
+    borderWidth: 1, borderColor: C.border,
+    marginTop: 18, marginBottom: 4, overflow: 'hidden',
+  },
+  completeStat:        { flex: 1, padding: 16, alignItems: 'center' },
+  completeStatDivider: { width: 1, height: 36, backgroundColor: C.border },
+  completeStatVal: { fontSize: 22, fontWeight: '900', color: C.text },
+  completeStatLbl: { fontSize: 10, color: C.muted, marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.5 },
   doneBtn: {
-    backgroundColor: C.accent, borderRadius: 14,
-    paddingHorizontal: 48, paddingVertical: 14, marginTop: 20,
+    backgroundColor: C.accent, borderRadius: 999,
+    paddingHorizontal: 48, paddingVertical: 16, marginTop: 18,
+    shadowColor: '#FFC107', shadowOpacity: 0.5, shadowRadius: 18,
+    shadowOffset: { width: 0, height: 5 }, elevation: 8,
   },
-  doneBtnText: { fontSize: 16, fontWeight: '800', color: '#000' },
+  doneBtnText: { fontSize: 16, fontWeight: '900', color: '#07080F', letterSpacing: 0.8 },
 
   // ── Slide-up cards ────────────────────────────────────────
   slideCard: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: C.surface,
-    borderTopLeftRadius: 26, borderTopRightRadius: 26,
-    padding: 20, paddingBottom: 44,
-    borderWidth: 1, borderBottomWidth: 0, borderColor: 'rgba(255,255,255,0.07)',
+    borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 20, paddingBottom: 44, paddingTop: 0,
+    borderWidth: 1, borderBottomWidth: 0, borderColor: 'rgba(255,255,255,0.08)',
     shadowColor: '#000', shadowOpacity: 1, shadowRadius: 30, elevation: 30,
+    overflow: 'hidden',
   },
   slideHandle: {
-    width: 44, height: 4, backgroundColor: C.border, borderRadius: 2,
-    alignSelf: 'center', marginBottom: 18,
+    width: 48, height: 4, backgroundColor: C.border, borderRadius: 2,
+    alignSelf: 'center', marginBottom: 16, marginTop: 14,
   },
+
+  // ── Countdown timer ────────────────────────────────────────
+  countdownTrack: {
+    height: 4, backgroundColor: C.surface3,
+    marginBottom: 0,
+  },
+  countdownBar: { height: 4, borderRadius: 0 },
+  countdownPill: {
+    backgroundColor: C.redDim, borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 4,
+    borderWidth: 1, borderColor: C.red + '44',
+  },
+  countdownPillTxt: { fontSize: 12, fontWeight: '800', color: C.red },
 
   // ── Request card internals ────────────────────────────────
   reqBadge: {
@@ -900,24 +1007,26 @@ const s = StyleSheet.create({
 
   reqBtns:    { flexDirection: 'row', gap: 10 },
   declineBtn: {
-    flex: 1, borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    flex: 1, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(244,63,94,0.35)',
     backgroundColor: C.redDim, padding: 15, alignItems: 'center',
   },
-  declineText: { color: C.red, fontSize: 15, fontWeight: '700' },
+  declineText: { color: C.red, fontSize: 15, fontWeight: '800' },
   acceptBtn:   {
-    flex: 2, borderRadius: 14, backgroundColor: C.green,
+    flex: 2, borderRadius: 999, backgroundColor: C.green,
     padding: 15, alignItems: 'center',
+    shadowColor: C.green, shadowOpacity: 0.5, shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 }, elevation: 8,
   },
-  acceptText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  acceptText: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 },
 
   // ── Active ride card internals ────────────────────────────
   activeTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 },
   activeTitle: { fontSize: 18, fontWeight: '800', color: C.text },
   activeSub:   { fontSize: 13, color: C.muted, marginTop: 3 },
   activeBadge: {
-    backgroundColor: C.accentDim, borderRadius: 8,
+    backgroundColor: C.accentDim, borderRadius: 999,
     borderWidth: 1, borderColor: 'rgba(255,215,0,0.25)',
-    paddingHorizontal: 10, paddingVertical: 4,
+    paddingHorizontal: 12, paddingVertical: 5,
   },
   activeBadgeText: { fontSize: 11, fontWeight: '700', color: C.accent },
 
@@ -925,6 +1034,7 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     padding: 16, backgroundColor: C.surface2,
     borderRadius: 16, borderWidth: 1, borderColor: C.border, marginBottom: 14,
+    shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 8, elevation: 3,
   },
   paxAvatarRing: {
     width: 68, height: 68, borderRadius: 34,
@@ -944,15 +1054,17 @@ const s = StyleSheet.create({
   // ── Action row (navigate + arrived) ──────────────────────
   actionRow:    { flexDirection: 'row', gap: 10 },
   navigateBtn:  {
-    flex: 1, borderRadius: 14, padding: 16, alignItems: 'center',
-    backgroundColor: C.surface2, borderWidth: 1, borderColor: 'rgba(59,130,246,0.35)',
+    flex: 1, borderRadius: 999, padding: 16, alignItems: 'center',
+    backgroundColor: C.surface2, borderWidth: 1, borderColor: 'rgba(56,189,248,0.35)',
   },
-  navigateBtnText: { fontSize: 14, fontWeight: '700', color: C.blue },
+  navigateBtnText: { fontSize: 14, fontWeight: '800', color: C.blue, letterSpacing: 0.3 },
   arrivedBtn: {
-    flex: 2, backgroundColor: C.accent, borderRadius: 14,
+    flex: 2, backgroundColor: C.accent, borderRadius: 999,
     padding: 16, alignItems: 'center',
+    shadowColor: '#FFC107', shadowOpacity: 0.5, shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 }, elevation: 8,
   },
-  arrivedBtnText: { fontSize: 15, fontWeight: '800', color: '#000' },
+  arrivedBtnText: { fontSize: 15, fontWeight: '900', color: '#07080F', letterSpacing: 0.5 },
 
   // ── Destination row (active card) ─────────────────────────
   destRow: {
@@ -1073,11 +1185,11 @@ const s = StyleSheet.create({
   },
   reportBtnRow:    { flexDirection: 'row', gap: 10 },
   reportCancelBtn: {
-    flex: 1, padding: 14, borderRadius: 12,
+    flex: 1, padding: 14, borderRadius: 999,
     backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border, alignItems: 'center',
   },
-  reportSubmitBtn:  { flex: 2, padding: 14, borderRadius: 12, backgroundColor: C.red, alignItems: 'center' },
-  reportSubmitText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  reportSubmitBtn:  { flex: 2, padding: 14, borderRadius: 999, backgroundColor: C.red, alignItems: 'center' },
+  reportSubmitText: { color: '#fff', fontWeight: '900', fontSize: 14, letterSpacing: 0.5 },
 
   // ── Messages (legacy, kept for safety) ───────────────────
   incomingMsgWrap: {

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, Image, TouchableOpacity, StyleSheet,
   Alert, ScrollView, ActivityIndicator, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useAuthStore } from '../store/authStore';
 import { useRideStore } from '../store/rideStore';
@@ -107,10 +108,36 @@ function PhotoCard({ uri, label, onPress, uploading }) {
 export default function ProfileScreen() {
   const { profile, session, signOut, updateProfilePhoto, fetchProfile } = useAuthStore();
   const { rideHistory } = useRideStore();
-  const [uploading, setUploading]       = useState({});
-  const [editVisible, setEditVisible]   = useState(false);
-  const [savingProfile, setSaving]      = useState(false);
-  const [editData, setEditData]         = useState({});
+  const [uploading, setUploading]         = useState({});
+  const [editVisible, setEditVisible]     = useState(false);
+  const [savingProfile, setSaving]        = useState(false);
+  const [editData, setEditData]           = useState({});
+  const [emergContact, setEmergContact]   = useState({ name: '', phone: '' });
+  const [emergModal, setEmergModal]       = useState(false);
+  const [emergDraft, setEmergDraft]       = useState({ name: '', phone: '' });
+
+  useEffect(() => {
+    AsyncStorage.getItem('parapo_emerg_contact').then((v) => {
+      if (v) { try { setEmergContact(JSON.parse(v)); } catch (_) {} }
+    });
+  }, []);
+
+  const openEmergModal = () => {
+    setEmergDraft({ ...emergContact });
+    setEmergModal(true);
+  };
+
+  const saveEmergContact = async () => {
+    if (!emergDraft.name.trim() && !emergDraft.phone.trim()) {
+      await AsyncStorage.removeItem('parapo_emerg_contact');
+      setEmergContact({ name: '', phone: '' });
+    } else {
+      const saved = { name: emergDraft.name.trim(), phone: emergDraft.phone.trim() };
+      await AsyncStorage.setItem('parapo_emerg_contact', JSON.stringify(saved));
+      setEmergContact(saved);
+    }
+    setEmergModal(false);
+  };
 
   const handleSignOut = () => {
     Alert.alert('Mag-logout', 'Sigurado ka bang mag-logout?', [
@@ -262,6 +289,21 @@ export default function ProfileScreen() {
           <Text style={[s.roleLabel, { color: rc.color }]}>{rc.label}</Text>
         </View>
         <Text style={s.avatarHint}>Tap photo to update</Text>
+
+        {/* Verification status badge */}
+        {profile?.is_verified ? (
+          <View style={s.verifiedBadge}>
+            <Text style={s.verifiedBadgeTxt}>✓ Verified Account</Text>
+          </View>
+        ) : (
+          <View style={s.pendingBadge}>
+            <Text style={s.pendingBadgeTxt}>
+              {(profile?.id_photo_url || profile?.license_photo_url)
+                ? '⏳ Pending Admin Review'
+                : '📋 Upload documents to verify'}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* ── STATS ROW ── */}
@@ -349,19 +391,114 @@ export default function ProfileScreen() {
         ))}
       </View>
 
+      {/* ── EMERGENCY CONTACT ── */}
+      <SectionHeader title="Emergency Contact" onEdit={openEmergModal} />
+      <TouchableOpacity style={s.emergCard} onPress={openEmergModal} activeOpacity={0.85}>
+        {emergContact.name || emergContact.phone ? (
+          <View style={s.emergContactRow}>
+            <View style={s.emergAvatar}>
+              <Text style={s.emergAvatarText}>
+                {emergContact.name?.[0]?.toUpperCase() ?? '?'}
+              </Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.emergName}>{emergContact.name || '—'}</Text>
+              <Text style={s.emergPhone}>{emergContact.phone || '—'}</Text>
+            </View>
+            <View style={s.emergReadyBadge}>
+              <Text style={s.emergReadyText}>✓ Set</Text>
+            </View>
+          </View>
+        ) : (
+          <View style={s.emergEmpty}>
+            <Text style={s.emergEmptyIcon}>🆘</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.emergEmptyTitle}>No emergency contact</Text>
+              <Text style={s.emergEmptyHint}>Tap to add someone to notify in an emergency</Text>
+            </View>
+            <Text style={s.emergAddBtn}>Add →</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
       {/* ── SAFETY CARD ── */}
       <View style={s.safetyCard}>
-        <Text style={s.safetyTitle}>🛡  Safety</Text>
+        <Text style={s.safetyTitle}>🛡  Safety Hotlines</Text>
         <Text style={s.safetySub}>
-          In case of emergency, call{' '}
-          <Text style={{ color: C.red, fontWeight: '700' }}>117</Text>
-          {' '}(PNP) or{' '}
-          <Text style={{ color: C.red, fontWeight: '700' }}>911</Text>.
+          Emergency:{' '}
+          <Text style={{ color: C.red, fontWeight: '800' }}>911</Text>
+          {'  ·  '}PNP:{' '}
+          <Text style={{ color: C.red, fontWeight: '800' }}>117</Text>
+          {'  ·  '}BFP:{' '}
+          <Text style={{ color: C.red, fontWeight: '800' }}>160</Text>
         </Text>
-        <Text style={[s.safetySub, { marginTop: 6 }]}>
+        <Text style={[s.safetySub, { marginTop: 6, lineHeight: 20 }]}>
           Violations may result in account warnings or permanent suspension.
         </Text>
       </View>
+
+      {/* ── EMERGENCY CONTACT MODAL ── */}
+      <Modal
+        visible={emergModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEmergModal(false)}
+      >
+        <KeyboardAvoidingView
+          style={s.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={s.modalCard}>
+            <View style={s.modalHeader}>
+              <Text style={s.modalTitle}>Emergency Contact</Text>
+              <TouchableOpacity onPress={() => setEmergModal(false)}>
+                <Text style={s.modalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={s.emergModalHint}>
+              This person will be shown when you tap SOS during a ride.
+            </Text>
+            <View style={s.modalField}>
+              <Text style={s.modalFieldLabel}>Full Name</Text>
+              <TextInput
+                style={s.modalInput}
+                value={emergDraft.name}
+                onChangeText={(v) => setEmergDraft((d) => ({ ...d, name: v }))}
+                placeholder="e.g. Maria Santos"
+                placeholderTextColor={C.muted2}
+                autoCorrect={false}
+              />
+            </View>
+            <View style={s.modalField}>
+              <Text style={s.modalFieldLabel}>Mobile Number</Text>
+              <TextInput
+                style={s.modalInput}
+                value={emergDraft.phone}
+                onChangeText={(v) => setEmergDraft((d) => ({ ...d, phone: v }))}
+                placeholder="e.g. 09171234567"
+                placeholderTextColor={C.muted2}
+                keyboardType="phone-pad"
+              />
+            </View>
+            <TouchableOpacity style={s.modalSaveBtn} onPress={saveEmergContact} activeOpacity={0.82}>
+              <Text style={s.modalSaveBtnText}>Save Contact</Text>
+            </TouchableOpacity>
+            {(emergContact.name || emergContact.phone) && (
+              <TouchableOpacity
+                style={s.emergClearBtn}
+                onPress={async () => {
+                  await AsyncStorage.removeItem('parapo_emerg_contact');
+                  setEmergContact({ name: '', phone: '' });
+                  setEmergModal(false);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={s.emergClearText}>Remove Contact</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* ── SIGN OUT ── */}
       <TouchableOpacity style={s.signOutBtn} onPress={handleSignOut} activeOpacity={0.8}>
@@ -420,174 +557,235 @@ export default function ProfileScreen() {
 
 const s = StyleSheet.create({
   root:   { flex: 1, backgroundColor: C.bg },
-  scroll: { padding: 20, paddingBottom: 50 },
+  scroll: { padding: 18, paddingBottom: 56 },
 
+  // ── Section headers ───────────────────────────────────────
   sectionHeaderRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginBottom: 8, marginTop: 6, marginLeft: 2,
+    marginBottom: 10, marginTop: 8, paddingHorizontal: 2,
   },
   sectionHeader: {
-    fontSize: 11, fontWeight: '700', color: C.muted,
-    textTransform: 'uppercase', letterSpacing: 1,
+    fontSize: 10, fontWeight: '800', color: C.muted,
+    textTransform: 'uppercase', letterSpacing: 2,
   },
-  editBtn:     { backgroundColor: C.accentDim, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: C.accent + '44' },
-  editBtnText: { fontSize: 11, fontWeight: '700', color: C.accent },
+  editBtn:     { backgroundColor: C.accentDim, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: 'rgba(255,193,7,0.35)' },
+  editBtnText: { fontSize: 11, fontWeight: '800', color: C.accent, letterSpacing: 0.5 },
 
   // ── Hero ──────────────────────────────────────────────────
-  heroSection: { alignItems: 'center', paddingVertical: 24 },
+  heroSection: { alignItems: 'center', paddingVertical: 28 },
   avatarRing: {
-    width: 110, height: 110, borderRadius: 55,
+    width: 116, height: 116, borderRadius: 58,
     borderWidth: 2.5, alignItems: 'center', justifyContent: 'center',
     marginBottom: 14, position: 'relative',
+    shadowColor: '#FFC107', shadowOpacity: 0.35, shadowRadius: 16,
+    shadowOffset: { width: 0, height: 0 }, elevation: 8,
   },
-  avatarImg: { width: 100, height: 100, borderRadius: 50 },
+  avatarImg: { width: 106, height: 106, borderRadius: 53 },
   avatar: {
-    width: 94, height: 94, borderRadius: 47,
+    width: 100, height: 100, borderRadius: 50,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 12, elevation: 8,
   },
-  avatarText: { fontSize: 38, fontWeight: '900', color: '#000' },
+  avatarText: { fontSize: 38, fontWeight: '900', color: '#07080F' },
   cameraBadge: {
     position: 'absolute', bottom: 2, right: 2,
-    width: 30, height: 30, borderRadius: 15,
+    width: 32, height: 32, borderRadius: 16,
     backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: C.bg,
+    borderWidth: 2.5, borderColor: C.bg,
+    shadowColor: C.accent, shadowOpacity: 0.5, shadowRadius: 8, elevation: 6,
   },
-  avatarHint: { fontSize: 11, color: C.muted2, marginTop: 4 },
-  name:       { fontSize: 22, fontWeight: '800', color: C.text, textAlign: 'center' },
+  avatarHint: { fontSize: 11, color: C.muted2, marginTop: 6, letterSpacing: 0.3 },
+  verifiedBadge: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: C.greenDim, borderRadius: 999,
+    paddingHorizontal: 14, paddingVertical: 6, marginTop: 10,
+    borderWidth: 1, borderColor: 'rgba(16,185,129,0.35)',
+  },
+  verifiedBadgeTxt: { fontSize: 12, fontWeight: '800', color: C.green, letterSpacing: 0.3 },
+  pendingBadge: {
+    backgroundColor: C.accentDim, borderRadius: 999,
+    paddingHorizontal: 14, paddingVertical: 6, marginTop: 10,
+    borderWidth: 1, borderColor: 'rgba(255,193,7,0.35)',
+  },
+  pendingBadgeTxt: { fontSize: 12, fontWeight: '700', color: C.accent },
+  name:       { fontSize: 22, fontWeight: '800', color: C.text, textAlign: 'center', letterSpacing: -0.3 },
   roleBadge:  {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    borderRadius: 20, paddingHorizontal: 16, paddingVertical: 6,
-    borderWidth: 1, marginTop: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    borderRadius: 999, paddingHorizontal: 18, paddingVertical: 7,
+    borderWidth: 1, marginTop: 12,
   },
-  roleEmoji:    { fontSize: 15 },
+  roleEmoji:    { fontSize: 14 },
   roleTrikeWrap: {
-    width: 26, height: 20, borderRadius: 5,
+    width: 28, height: 22, borderRadius: 6,
     backgroundColor: C.accent,
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
-  roleTrikeImg: { width: 23, height: 18 },
+  roleTrikeImg: { width: 25, height: 19 },
   statTrikeWrap: {
-    width: 40, height: 32, borderRadius: 8,
+    width: 44, height: 34, borderRadius: 10,
     backgroundColor: C.accent,
     alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
-  statTrikeImg: { width: 36, height: 29 },
-  roleLabel: { fontWeight: '700', fontSize: 14 },
+  statTrikeImg: { width: 38, height: 30 },
+  roleLabel: { fontWeight: '800', fontSize: 13, letterSpacing: 0.3 },
 
   // ── Stats ─────────────────────────────────────────────────
   statsRow: {
     flexDirection: 'row', backgroundColor: C.surface,
-    borderRadius: 18, borderWidth: 1, borderColor: C.border,
-    overflow: 'hidden', marginBottom: 14,
+    borderRadius: 20, borderWidth: 1, borderColor: C.border,
+    overflow: 'hidden', marginBottom: 16,
+    shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
   },
-  statBox:     { flex: 1, alignItems: 'center', paddingVertical: 16 },
-  statDivider: { width: 1, backgroundColor: C.border, marginVertical: 10 },
-  statVal:     { fontSize: 18, fontWeight: '900', color: C.text },
-  statLbl:     { fontSize: 10, color: C.muted, marginTop: 3, textTransform: 'uppercase', letterSpacing: 0.5 },
+  statBox:     { flex: 1, alignItems: 'center', paddingVertical: 18 },
+  statDivider: { width: 1, backgroundColor: C.divider, marginVertical: 12 },
+  statVal:     { fontSize: 20, fontWeight: '900', color: C.text },
+  statLbl:     { fontSize: 9, color: C.muted, marginTop: 4, textTransform: 'uppercase', letterSpacing: 1 },
 
   // ── Info card ─────────────────────────────────────────────
   infoCard: {
-    backgroundColor: C.surface, borderRadius: 18,
+    backgroundColor: C.surface, borderRadius: 20,
     borderWidth: 1, borderColor: C.border,
-    overflow: 'hidden', marginBottom: 14,
+    overflow: 'hidden', marginBottom: 16,
+    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 10, elevation: 4,
   },
   infoRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
-    padding: 15, borderBottomWidth: 1, borderBottomColor: C.border,
+    paddingHorizontal: 18, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: C.divider,
   },
-  infoLabel: { fontSize: 13, color: C.muted, paddingTop: 1 },
+  infoLabel: { fontSize: 12, color: C.muted, paddingTop: 1 },
   infoValue: { fontSize: 14, fontWeight: '600', color: C.text, maxWidth: '62%', textAlign: 'right' },
 
   // ── Photo card ────────────────────────────────────────────
   photoCard: {
-    backgroundColor: C.surface, borderRadius: 18,
+    backgroundColor: C.surface, borderRadius: 20,
     borderWidth: 1, borderColor: C.border,
-    overflow: 'hidden', marginBottom: 14,
+    overflow: 'hidden', marginBottom: 16,
+    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 10, elevation: 4,
   },
   photoLabelRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    padding: 14, paddingBottom: 10,
+    paddingHorizontal: 16, paddingVertical: 12,
   },
-  photoLabel:        { fontSize: 11, fontWeight: '700', color: C.muted, textTransform: 'uppercase', letterSpacing: 1 },
-  photoChangeBtn:    { backgroundColor: C.accentDim, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 5, borderWidth: 1, borderColor: C.accent + '44' },
-  photoChangeBtnText:{ fontSize: 12, color: C.accent, fontWeight: '700' },
-  photoImg:          { width: '100%', height: 180, marginTop: 4 },
+  photoLabel:        { fontSize: 10, fontWeight: '800', color: C.muted, textTransform: 'uppercase', letterSpacing: 2 },
+  photoChangeBtn:    { backgroundColor: C.accentDim, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(255,193,7,0.35)' },
+  photoChangeBtnText:{ fontSize: 12, color: C.accent, fontWeight: '800' },
+  photoImg:          { width: '100%', height: 185, marginTop: 4 },
   photoOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(0,0,0,0.45)', padding: 8, alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)', padding: 10, alignItems: 'center',
   },
   photoOverlayText: { fontSize: 12, color: '#fff', fontWeight: '600' },
   photoEmpty: {
-    height: 120, alignItems: 'center', justifyContent: 'center', gap: 8,
-    borderTopWidth: 1, borderTopColor: C.border,
-    backgroundColor: C.surface2, margin: 0,
+    height: 124, alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderTopWidth: 1, borderTopColor: C.divider,
+    backgroundColor: C.surface2,
   },
   photoEmptyIcon: { fontSize: 28 },
   photoEmptyText: { fontSize: 13, color: C.muted, fontWeight: '600' },
 
   // ── Community rules ───────────────────────────────────────
   rulesCard: {
-    backgroundColor: C.surface, borderRadius: 18,
+    backgroundColor: C.surface, borderRadius: 20,
     borderWidth: 1, borderColor: C.border,
-    overflow: 'hidden', marginBottom: 14,
+    overflow: 'hidden', marginBottom: 16,
   },
   ruleRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-    padding: 13, borderBottomWidth: 1, borderBottomColor: C.border,
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    paddingHorizontal: 16, paddingVertical: 13,
+    borderBottomWidth: 1, borderBottomColor: C.divider,
   },
-  ruleIcon: { fontSize: 15, marginTop: 1 },
+  ruleIcon: { fontSize: 14, marginTop: 1 },
   ruleText: { fontSize: 13, color: C.muted, flex: 1, lineHeight: 18 },
+
+  // ── Emergency contact ─────────────────────────────────────
+  emergCard: {
+    backgroundColor: C.surface, borderRadius: 20,
+    borderWidth: 1, borderColor: 'rgba(244,63,94,0.25)',
+    padding: 16, marginBottom: 16,
+    shadowColor: C.red, shadowOpacity: 0.12, shadowRadius: 10, elevation: 4,
+  },
+  emergContactRow:  { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  emergAvatar: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: C.redDim, borderWidth: 1.5, borderColor: 'rgba(244,63,94,0.4)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  emergAvatarText: { fontSize: 18, fontWeight: '900', color: C.red },
+  emergName:       { fontSize: 15, fontWeight: '700', color: C.text, marginBottom: 2 },
+  emergPhone:      { fontSize: 13, color: C.muted },
+  emergReadyBadge: {
+    backgroundColor: 'rgba(16,185,129,0.14)', borderRadius: 999,
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)',
+  },
+  emergReadyText: { fontSize: 11, fontWeight: '800', color: C.green },
+  emergEmpty:     { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  emergEmptyIcon: { fontSize: 28 },
+  emergEmptyTitle:{ fontSize: 14, fontWeight: '700', color: C.text, marginBottom: 2 },
+  emergEmptyHint: { fontSize: 12, color: C.muted, lineHeight: 18 },
+  emergAddBtn:    { fontSize: 13, fontWeight: '800', color: C.accent },
+  emergModalHint: {
+    fontSize: 12, color: C.muted, lineHeight: 18,
+    marginBottom: 16, paddingHorizontal: 2,
+  },
+  emergClearBtn: {
+    alignItems: 'center', marginTop: 12, paddingVertical: 12,
+  },
+  emergClearText: { fontSize: 13, color: C.red, fontWeight: '700' },
 
   // ── Safety card ───────────────────────────────────────────
   safetyCard: {
-    backgroundColor: C.redDim, borderRadius: 14,
-    borderWidth: 1, borderColor: 'rgba(239,68,68,0.25)',
-    padding: 14, marginBottom: 14,
+    backgroundColor: C.redDim, borderRadius: 18,
+    borderWidth: 1, borderColor: 'rgba(244,63,94,0.22)',
+    padding: 16, marginBottom: 16,
   },
-  safetyTitle: { fontSize: 13, fontWeight: '700', color: C.red, marginBottom: 5 },
-  safetySub:   { fontSize: 13, color: C.muted, lineHeight: 19 },
+  safetyTitle: { fontSize: 13, fontWeight: '800', color: C.red, marginBottom: 6 },
+  safetySub:   { fontSize: 13, color: C.muted, lineHeight: 20 },
 
   // ── Sign out ──────────────────────────────────────────────
   signOutBtn: {
-    backgroundColor: C.surface, borderRadius: 14,
-    padding: 16, alignItems: 'center',
-    borderWidth: 1, borderColor: C.border,
-    marginBottom: 24,
+    borderRadius: 999, padding: 17, alignItems: 'center',
+    borderWidth: 1.5, borderColor: 'rgba(244,63,94,0.35)',
+    backgroundColor: C.redDim, marginBottom: 28,
   },
-  signOutText: { color: C.red, fontWeight: '700', fontSize: 15 },
+  signOutText: { color: C.red, fontWeight: '800', fontSize: 15, letterSpacing: 0.5 },
 
-  footer: { textAlign: 'center', fontSize: 12, color: C.muted2 },
+  footer: { textAlign: 'center', fontSize: 11, color: C.muted2, letterSpacing: 0.5 },
 
   // ── Edit modal ────────────────────────────────────────────
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.65)',
     justifyContent: 'flex-end',
   },
   modalCard: {
-    backgroundColor: C.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24,
-    padding: 20, paddingBottom: 36, maxHeight: '90%',
+    backgroundColor: C.surface,
+    borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    borderWidth: 1, borderColor: C.border, borderBottomWidth: 0,
+    padding: 22, paddingBottom: 40, maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 18,
   },
-  modalTitle:  { fontSize: 17, fontWeight: '800', color: C.text },
-  modalClose:  { fontSize: 18, color: C.muted, paddingHorizontal: 4 },
+  modalTitle:  { fontSize: 18, fontWeight: '800', color: C.text, letterSpacing: -0.3 },
+  modalClose:  { fontSize: 18, color: C.muted, paddingHorizontal: 6, paddingVertical: 2 },
   modalSectionLabel: {
-    fontSize: 10, fontWeight: '700', color: C.muted,
-    textTransform: 'uppercase', letterSpacing: 1,
-    marginTop: 12, marginBottom: 4, marginLeft: 2,
+    fontSize: 10, fontWeight: '800', color: C.muted,
+    textTransform: 'uppercase', letterSpacing: 2,
+    marginTop: 14, marginBottom: 8, marginLeft: 2,
   },
   modalField:      { marginBottom: 10 },
-  modalFieldLabel: { fontSize: 11, color: C.muted, marginBottom: 3, marginLeft: 2 },
+  modalFieldLabel: { fontSize: 10, color: C.muted, marginBottom: 6, marginLeft: 2, fontWeight: '700', letterSpacing: 1 },
   modalInput: {
-    backgroundColor: C.bg, borderRadius: 12, borderWidth: 1, borderColor: C.border,
-    padding: 13, fontSize: 14, color: C.text,
+    backgroundColor: C.surface3, borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 16, paddingVertical: 14, fontSize: 14, color: C.text,
   },
   modalSaveBtn: {
-    backgroundColor: C.accent, borderRadius: 14, padding: 16,
-    alignItems: 'center', marginTop: 18,
+    backgroundColor: C.accent, borderRadius: 999, paddingVertical: 17,
+    alignItems: 'center', marginTop: 20,
+    shadowColor: '#FFC107', shadowOpacity: 0.45, shadowRadius: 18,
+    shadowOffset: { width: 0, height: 5 }, elevation: 8,
   },
-  modalSaveBtnText: { fontSize: 15, fontWeight: '800', color: '#000' },
+  modalSaveBtnText: { fontSize: 15, fontWeight: '900', color: '#07080F', letterSpacing: 1 },
 });

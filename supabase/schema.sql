@@ -394,3 +394,30 @@ do $$ begin
   alter publication supabase_realtime add table admin_messages;
 exception when duplicate_object then null;
 end $$;
+
+-- ── APP SETTINGS (admin-configurable global values) ───────────
+create table if not exists app_settings (
+  key        text primary key,
+  value      text not null,
+  updated_by uuid references profiles(id) on delete set null,
+  updated_at timestamptz default now()
+);
+
+alter table app_settings enable row level security;
+
+drop policy if exists "Everyone can read app settings"  on app_settings;
+drop policy if exists "Admins can manage app settings"  on app_settings;
+
+create policy "Everyone can read app settings"
+  on app_settings for select using (true);
+
+create policy "Admins can manage app settings"
+  on app_settings for all using (
+    exists (select 1 from profiles where id = auth.uid() and role = 'admin')
+  );
+
+-- Seed default SOS emergency contact (idempotent)
+insert into app_settings (key, value) values
+  ('sos_contact_name',   'PNP Calauan'),
+  ('sos_contact_number', '0491-5350147')
+on conflict (key) do nothing;

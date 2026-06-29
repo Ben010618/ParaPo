@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/authStore';
+import { SkeletonCard } from '../components/Skeleton';
 
 const TRAYSIKEL_IMAGE = require('../../assets/traysikel.png');
 import { C } from '../theme/colors';
@@ -34,6 +35,11 @@ export default function AdminScreen() {
   // Reports state
   const [reports, setReports]       = useState([]);
   const [reportsLoading, setReportsLoading] = useState(false);
+
+  // SOS Settings state
+  const [sosName,   setSosName]   = useState('PNP Calauan');
+  const [sosNumber, setSosNumber] = useState('0491-5350147');
+  const [sosSaving, setSosSaving] = useState(false);
 
   // Message modal state
   const [msgModal, setMsgModal]     = useState(false);
@@ -70,7 +76,48 @@ export default function AdminScreen() {
   }, []);
 
   const loadAll = async () => {
-    await Promise.allSettled([loadDrivers(), loadRides(), loadReports()]);
+    await Promise.allSettled([loadDrivers(), loadRides(), loadReports(), loadSOS()]);
+  };
+
+  const loadSOS = async () => {
+    try {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('key, value')
+        .in('key', ['sos_contact_name', 'sos_contact_number']);
+      if (!mountedRef.current || !data) return;
+      data.forEach(({ key, value }) => {
+        if (key === 'sos_contact_name')   setSosName(value);
+        if (key === 'sos_contact_number') setSosNumber(value);
+      });
+    } catch (_) {}
+  };
+
+  const saveSOS = async () => {
+    if (!sosName.trim() || !sosNumber.trim()) {
+      Alert.alert('Incomplete', 'Enter both contact name and number.');
+      return;
+    }
+    const adminId = session?.user?.id;
+    if (!adminId) return;
+    setSosSaving(true);
+    try {
+      await Promise.all([
+        supabase.from('app_settings').upsert(
+          { key: 'sos_contact_name', value: sosName.trim(), updated_by: adminId, updated_at: new Date().toISOString() },
+          { onConflict: 'key' },
+        ),
+        supabase.from('app_settings').upsert(
+          { key: 'sos_contact_number', value: sosNumber.trim(), updated_by: adminId, updated_at: new Date().toISOString() },
+          { onConflict: 'key' },
+        ),
+      ]);
+      Alert.alert('Saved ✓', 'SOS contact updated. Passengers will see the new number immediately.');
+    } catch (e) {
+      Alert.alert('Error', e?.message ?? 'Could not save SOS contact.');
+    } finally {
+      if (mountedRef.current) setSosSaving(false);
+    }
   };
 
   const loadDrivers = async () => {
@@ -274,6 +321,50 @@ export default function AdminScreen() {
           ))}
         </View>
 
+        {/* ── SOS Emergency Contact ── */}
+        <View style={s.panel}>
+          <View style={s.panelHeader}>
+            <Text style={s.panelTitle}>🆘 SOS Emergency Contact</Text>
+            <View style={[s.panelBadge, { backgroundColor: C.redDim }]}>
+              <Text style={[s.panelBadgeText, { color: C.red }]}>Passenger-facing</Text>
+            </View>
+          </View>
+          <View style={s.sosBody}>
+            <Text style={s.sosHint}>
+              Passengers see this contact in their SOS alert when they tap the emergency button during a ride.
+            </Text>
+            <Text style={s.sosLabel}>CONTACT NAME</Text>
+            <TextInput
+              style={s.sosInput}
+              value={sosName}
+              onChangeText={setSosName}
+              placeholder="e.g. PNP Calauan"
+              placeholderTextColor={C.muted2}
+              editable={!sosSaving}
+            />
+            <Text style={s.sosLabel}>CONTACT NUMBER</Text>
+            <TextInput
+              style={s.sosInput}
+              value={sosNumber}
+              onChangeText={setSosNumber}
+              placeholder="e.g. 0491-5350147"
+              placeholderTextColor={C.muted2}
+              keyboardType="phone-pad"
+              editable={!sosSaving}
+            />
+            <TouchableOpacity
+              style={[s.sosSaveBtn, sosSaving && { opacity: 0.55 }]}
+              onPress={saveSOS}
+              disabled={sosSaving}
+              activeOpacity={0.82}
+            >
+              {sosSaving
+                ? <ActivityIndicator color="#000" />
+                : <Text style={s.sosSaveBtnText}>Save SOS Contact →</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* ── Pending Reports ── */}
         <View style={s.panel}>
           <View style={s.panelHeader}>
@@ -285,7 +376,10 @@ export default function AdminScreen() {
             </View>
           </View>
           {reportsLoading ? (
-            <ActivityIndicator color={C.accent} style={{ padding: 20 }} />
+            <View style={{ padding: 12, gap: 10 }}>
+              <SkeletonCard />
+              <SkeletonCard />
+            </View>
           ) : reports.length === 0 ? (
             <Text style={s.emptyText}>No pending reports</Text>
           ) : (
@@ -495,8 +589,9 @@ const s = StyleSheet.create({
 
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
   statCard: {
-    width: '47%', backgroundColor: C.surface, borderRadius: 16,
+    width: '47%', backgroundColor: C.surface, borderRadius: 20,
     padding: 16, borderWidth: 1, borderColor: C.border,
+    shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 10, elevation: 4,
   },
   statIcon:     { fontSize: 20, marginBottom: 8 },
   statTrikeWrap: {
@@ -510,15 +605,16 @@ const s = StyleSheet.create({
   statLbl:  { fontSize: 12, color: C.muted, marginTop: 3 },
 
   panel: {
-    backgroundColor: C.surface, borderRadius: 16,
+    backgroundColor: C.surface, borderRadius: 20,
     borderWidth: 1, borderColor: C.border, marginBottom: 14, overflow: 'hidden',
+    shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 10, elevation: 4,
   },
   panelHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     padding: 14, borderBottomWidth: 1, borderBottomColor: C.border,
   },
   panelTitle: { fontSize: 14, fontWeight: '700', color: C.text },
-  panelBadge: { backgroundColor: C.surface3, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
+  panelBadge: { backgroundColor: C.surface3, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
   panelBadgeText: { fontSize: 12, fontWeight: '600', color: C.muted },
   emptyText: { fontSize: 13, color: C.muted, padding: 16, textAlign: 'center' },
 
@@ -529,32 +625,32 @@ const s = StyleSheet.create({
   reportMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 },
   reporterText: { fontSize: 13, color: C.text, flex: 1 },
   reasonTag: {
-    backgroundColor: C.orangeDim ?? 'rgba(251,146,60,0.15)', borderRadius: 8,
-    paddingHorizontal: 8, paddingVertical: 3,
-    borderWidth: 1, borderColor: C.orange + '44',
+    backgroundColor: C.warningDim ?? 'rgba(251,146,60,0.14)', borderRadius: 999,
+    paddingHorizontal: 10, paddingVertical: 3,
+    borderWidth: 1, borderColor: C.warning + '55',
   },
-  reasonTagText: { fontSize: 11, fontWeight: '700', color: C.orange },
-  reportDesc: { fontSize: 12, color: C.muted, lineHeight: 17, marginBottom: 8 },
+  reasonTagText: { fontSize: 11, fontWeight: '700', color: C.warning },
+  reportDesc: { fontSize: 12, color: C.muted, lineHeight: 18, marginBottom: 8 },
   disabledTag: {
-    backgroundColor: C.redDim, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: C.redDim, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4,
     marginBottom: 8, alignSelf: 'flex-start',
   },
   disabledTagText: { fontSize: 11, fontWeight: '700', color: C.red },
   reportActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
   actionWarn: {
-    flex: 1, backgroundColor: 'rgba(251,146,60,0.12)', borderRadius: 10,
+    flex: 1, backgroundColor: C.warningDim ?? 'rgba(251,146,60,0.14)', borderRadius: 999,
     padding: 9, alignItems: 'center',
-    borderWidth: 1, borderColor: C.orange + '44',
+    borderWidth: 1, borderColor: C.warning + '55',
   },
-  actionWarnText: { fontSize: 12, fontWeight: '700', color: C.orange },
+  actionWarnText: { fontSize: 12, fontWeight: '700', color: C.warning },
   actionDisable: {
-    flex: 1, backgroundColor: C.redDim, borderRadius: 10,
+    flex: 1, backgroundColor: C.redDim, borderRadius: 999,
     padding: 9, alignItems: 'center',
     borderWidth: 1, borderColor: C.red + '44',
   },
   actionDisableText: { fontSize: 12, fontWeight: '700', color: C.red },
   actionDismiss: {
-    flex: 1, backgroundColor: C.surface2, borderRadius: 10,
+    flex: 1, backgroundColor: C.surface2, borderRadius: 999,
     padding: 9, alignItems: 'center',
     borderWidth: 1, borderColor: C.border,
   },
@@ -576,7 +672,7 @@ const s = StyleSheet.create({
   driverActions: { alignItems: 'center', gap: 6 },
   statusDot:     { width: 9, height: 9, borderRadius: 5 },
   enableBtn: {
-    backgroundColor: C.greenDim, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
+    backgroundColor: C.greenDim, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5,
     borderWidth: 1, borderColor: C.green + '44',
   },
   enableBtnText: { fontSize: 11, fontWeight: '700', color: C.green },
@@ -597,7 +693,7 @@ const s = StyleSheet.create({
   },
   rideNames:    { fontSize: 12, fontWeight: '600', color: C.text },
   rideFare:     { fontSize: 11, color: C.muted, marginTop: 2 },
-  rideBadge:    { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  rideBadge:    { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
   rideBadgeText:{ fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
 
   // ── Message modal ─────────────────────────────────────────
@@ -617,11 +713,26 @@ const s = StyleSheet.create({
   modalClose:  { fontSize: 18, color: C.muted, paddingHorizontal: 4 },
   modalTo:     { fontSize: 13, color: C.muted, marginBottom: 10 },
   msgInput: {
-    backgroundColor: C.bg, borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    backgroundColor: C.bg, borderRadius: 16, borderWidth: 1, borderColor: C.border,
     padding: 14, fontSize: 14, color: C.text, minHeight: 110, marginBottom: 14,
   },
   sendBtn: {
-    backgroundColor: C.accent, borderRadius: 14, padding: 16, alignItems: 'center',
+    backgroundColor: C.accent, borderRadius: 999, padding: 16, alignItems: 'center',
+    shadowColor: '#FFC107', shadowOpacity: 0.38, shadowRadius: 14, elevation: 8,
   },
   sendBtnText: { fontSize: 15, fontWeight: '800', color: '#000' },
+
+  // ── SOS Settings ─────────────────────────────────────────────
+  sosBody:  { padding: 16, gap: 10 },
+  sosHint:  { fontSize: 12, color: C.muted, lineHeight: 18, marginBottom: 4 },
+  sosLabel: { fontSize: 10, fontWeight: '800', color: C.muted, letterSpacing: 2, marginBottom: 4, marginLeft: 2 },
+  sosInput: {
+    backgroundColor: C.bg, borderRadius: 14, borderWidth: 1, borderColor: C.border,
+    paddingHorizontal: 14, paddingVertical: 13, fontSize: 14, color: C.text, marginBottom: 6,
+  },
+  sosSaveBtn: {
+    backgroundColor: C.accent, borderRadius: 999, padding: 14, alignItems: 'center', marginTop: 4,
+    shadowColor: '#FFC107', shadowOpacity: 0.38, shadowRadius: 14, elevation: 8,
+  },
+  sosSaveBtnText: { fontSize: 14, fontWeight: '800', color: '#000', letterSpacing: 0.5 },
 });
